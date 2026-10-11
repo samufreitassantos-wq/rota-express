@@ -12,6 +12,7 @@ import { haversine } from './lib/geo.js';
 import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from './lib/delivery.js';
 import { getPhoto, putPhoto, deletePhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
 import { stopWindow, hasWindows, simulate, fmtHHMM, nowMinutes, DEFAULTS as TIMING_DEFAULTS } from './lib/timeWindows.js';
+import { summarize } from './lib/stats.js';
 import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from './lib/backup.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -654,8 +655,74 @@ $('#btn-finish').addEventListener('click', () => {
 
 // ---------- Histórico ----------
 const BACKUP_REMIND_DAYS = 7;
+let summaryPeriod = load('summaryPeriod', 'week');
+let summaryDay = null;
+
+const fmtNum = (n, digits = 1) => n.toLocaleString('pt-BR', { maximumFractionDigits: digits });
+const fmtWork = (min) => (min >= 60 ? `${Math.floor(min / 60)}h${String(Math.round(min % 60)).padStart(2, '0')}` : `${Math.round(min)} min`);
+const fmtDay = (key, opts) => new Date(`${key}T12:00:00`).toLocaleDateString('pt-BR', opts);
+
+function renderSummary() {
+  document.querySelectorAll('#summary [data-period]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.period === summaryPeriod);
+    b.setAttribute('aria-pressed', b.dataset.period === summaryPeriod);
+  });
+  // Rota em andamento também conta (entregas de hoje ainda não finalizadas).
+  const all = [route, ...history.filter((h) => h.id !== route.id)];
+  const s = summarize(all, summaryPeriod);
+  const tiles = [
+    ['Entregas', s.delivered],
+    ['Sucesso', s.successRate == null ? '—' : `${Math.round(s.successRate * 100)}%`],
+    ['Problemas', s.failed],
+    ['Distância', `${fmtNum(s.km)} km`],
+    ['Tempo na rua', s.workMinutes ? fmtWork(s.workMinutes) : '—'],
+    ...(summaryPeriod === 'today' ? [] : [['Média por dia trabalhado', s.perActiveDay == null ? '—' : fmtNum(s.perActiveDay)]]),
+  ];
+  let chart = '';
+  if (summaryPeriod !== 'today') {
+    const max = Math.max(1, ...s.days.map((d) => d.delivered));
+    const week = summaryPeriod === 'week';
+    const sel = s.days.find((d) => d.date === summaryDay);
+    chart = `
+      <h3 class="chart-title">Entregas por dia</h3>
+      <div class="bars ${week ? 'week' : 'month'}">
+        ${s.days.map((d, i) => {
+          const label = week ? fmtDay(d.date, { weekday: 'short' }).replace('.', '') : (i % 5 === 4 || i === s.days.length - 1 ? fmtDay(d.date, { day: 'numeric' }) : '');
+          return `<button class="bar ${d.date === summaryDay ? 'sel' : ''}" data-day="${d.date}"
+            aria-label="${fmtDay(d.date, { day: '2-digit', month: '2-digit' })}: ${d.delivered} entregas, ${d.failed} problemas">
+            <span class="col"><span class="fill" style="height:${(d.delivered / max) * 100}%"></span></span>
+            <span class="lbl">${label}</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <p class="small muted bar-detail">${sel
+        ? `<b>${fmtDay(sel.date, { weekday: 'long', day: '2-digit', month: '2-digit' })}</b>: ${sel.delivered} entregues · ${sel.failed} com problema · ${fmtNum(sel.km)} km`
+        : 'Toque em uma barra para ver o dia.'}</p>`;
+  }
+  const reasons = s.reasons.length
+    ? `<h3 class="chart-title">Problemas por motivo</h3>
+       <ul class="reasons">${s.reasons.map(([r, n]) => `<li><span>${esc(r)}</span><b>${n}</b></li>`).join('')}</ul>`
+    : '';
+  $('#summary-body').innerHTML = s.delivered + s.failed + s.km === 0
+    ? '<p class="muted small">Nenhuma entrega registrada neste período.</p>'
+    : `<div class="tiles">${tiles.map(([k, v]) => `<div class="tile"><span class="v">${v}</span><span class="k">${k}</span></div>`).join('')}</div>${chart}${reasons}`;
+}
+
+$('#summary').addEventListener('click', (e) => {
+  const p = e.target.closest('[data-period]');
+  const bar = e.target.closest('[data-day]');
+  if (p) {
+    summaryPeriod = p.dataset.period;
+    summaryDay = null;
+    save('summaryPeriod', summaryPeriod);
+  } else if (bar) {
+    summaryDay = bar.dataset.day === summaryDay ? null : bar.dataset.day;
+  } else return;
+  renderSummary();
+});
 
 function renderHistory() {
+  renderSummary();
   const last = settings.lastBackupAt ? Date.parse(settings.lastBackupAt) : 0;
   const overdue = history.length > 0 && Date.now() - last > BACKUP_REMIND_DAYS * 864e5;
   $('#backup-reminder').hidden = !overdue;

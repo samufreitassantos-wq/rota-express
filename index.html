@@ -66,6 +66,17 @@
       </section>
 
       <section id="view-history" class="view" data-view="history" hidden>
+        <section id="summary" class="card" aria-labelledby="summary-title">
+          <div class="summary-head">
+            <h2 id="summary-title">Resumo</h2>
+            <div class="segmented" role="group" aria-label="Período">
+              <button data-period="today">Hoje</button>
+              <button data-period="week">7 dias</button>
+              <button data-period="month">30 dias</button>
+            </div>
+          </div>
+          <div id="summary-body"></div>
+        </section>
         <h2>Histórico</h2>
         <div id="backup-reminder" class="card warn-card" hidden>
           <span id="backup-reminder-text"></span>
