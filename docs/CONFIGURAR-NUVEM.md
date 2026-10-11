@@ -49,14 +49,24 @@ Cada pessoa só recebe código quando entra pela primeira vez num aparelho (ou d
 O app pede um **código** em vez de um link: no iPhone/iPad, o link abriria no Safari e o app
 instalado na tela inicial continuaria deslogado.
 
-1. **Authentication** › **Emails** › **Magic link or OTP** (os campos só ficam editáveis depois do
-   passo 3).
-2. Troque o conteúdo por (no Body, toque em **Source** antes de colar):
+O Supabase usa **dois modelos**: **Confirm signup** no primeiro acesso de cada e-mail e
+**Magic link or OTP** nos seguintes. Os dois precisam mostrar o código (os campos só ficam
+editáveis depois do passo 3).
+
+1. **Authentication** › **Emails** › **Confirm signup**. Troque o conteúdo por (no Body, toque em
+   **Source** antes de colar):
    - Subject: `Seu código do Rota Express`
    - Body: `<p>Seu código para entrar no Rota Express: <strong>{{ .Token }}</strong></p><p>Ele vale por alguns minutos.</p>`
-3. **Save**.
+   - **Save**.
+2. **Authentication** › **Emails** › **Magic link or OTP**: o mesmo Subject e Body. **Save**.
+3. **Authentication** › **URL Configuration** › **Site URL**:
+   `https://<seu-usuario>.github.io/rota-express/` › **Save**. (Sem isso, links em e-mails do
+   Supabase apontam para `localhost:3000`.)
 4. **Authentication** › **Sign In / Providers** › **Email**: deixe **Enable Email provider** ligado
    e confira **Email OTP Length = 6**. Salve.
+
+> Se um e-mail chegar com **link** em vez de código ("Confirm your email address"), é porque o
+> modelo **Confirm signup** ainda está no padrão. Ajuste-o e peça um novo código no app.
 
 ## 5. Ligar o app ao Supabase
 
