@@ -23,23 +23,11 @@ funcionando como antes (só no aparelho).
    `seu-email@exemplo.com` pelo seu e-mail** (nas duas linhas, em minúsculas) e **Run**.
    Isso faz de você o administrador.
 
-## 3. Login por código de 6 dígitos
+## 3. Envio de e-mails (SMTP) — faça antes do passo 4
 
-O app pede um **código** em vez de um link: no iPhone/iPad, o link abriria no Safari e o app
-instalado na tela inicial continuaria deslogado.
-
-1. **Authentication** › **Emails** › **Templates** › **Magic Link**.
-2. Troque o conteúdo por:
-   - Subject: `Seu código do Rota Express`
-   - Body: `<p>Seu código para entrar no Rota Express: <strong>{{ .Token }}</strong></p><p>Ele vale por alguns minutos.</p>`
-3. **Save**.
-4. **Authentication** › **Sign In / Providers** › **Email**: deixe **Enable Email provider** ligado
-   e confira **Email OTP Length = 6**. Salve.
-
-## 4. Envio de e-mails (importante para a equipe)
-
-O envio padrão do Supabase permite **pouquíssimos e-mails por hora** e serve só para teste. Para
-a equipe, ligue um envio próprio, também gratuito:
+O envio padrão do Supabase permite **pouquíssimos e-mails por hora** e serve só para teste, e
+**o Supabase só deixa editar o modelo do e-mail (passo 4) depois que o SMTP próprio estiver
+configurado** (aviso "Set up custom SMTP to edit templates"). Ligue um envio próprio, gratuito:
 
 **Opção A — Gmail (mais simples):**
 1. Na conta Google que vai enviar: ative a **verificação em duas etapas**
@@ -55,6 +43,20 @@ a equipe, ligue um envio próprio, também gratuito:
 `smtp-relay.brevo.com`, porta `587` e as credenciais SMTP mostradas lá.
 
 Cada pessoa só recebe código quando entra pela primeira vez num aparelho (ou depois de "Sair").
+
+## 4. Login por código de 6 dígitos
+
+O app pede um **código** em vez de um link: no iPhone/iPad, o link abriria no Safari e o app
+instalado na tela inicial continuaria deslogado.
+
+1. **Authentication** › **Emails** › **Magic link or OTP** (os campos só ficam editáveis depois do
+   passo 3).
+2. Troque o conteúdo por (no Body, toque em **Source** antes de colar):
+   - Subject: `Seu código do Rota Express`
+   - Body: `<p>Seu código para entrar no Rota Express: <strong>{{ .Token }}</strong></p><p>Ele vale por alguns minutos.</p>`
+3. **Save**.
+4. **Authentication** › **Sign In / Providers** › **Email**: deixe **Enable Email provider** ligado
+   e confira **Email OTP Length = 6**. Salve.
 
 ## 5. Ligar o app ao Supabase
 
