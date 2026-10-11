@@ -15,8 +15,11 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - `src/lib/planner.js` — ORS com fallback para otimização local
 - `src/lib/pdf.js` — texto de PDF via pdf.js (build **legacy**, necessária no Safari/iPad); páginas sem texto vão para OCR
 - `src/lib/ocr.js` — Tesseract.js com arquivos em `public/ocr/` (gerados por `scripts/copy-ocr-assets.mjs` no predev/prebuild; não versionados)
+- `src/lib/timeWindows.js` — janelas de horário (windowStart/windowEnd "HH:MM"), simulação de ETA e otimização local com janelas (puro, testado)
 - `src/lib/delivery.js` — situação da entrega (outcome: delivered/failed), reordenação, CSV (puro, testado)
 - `src/lib/reportPdf.js` — relatório PDF com jsPDF (não usar window.print: não funciona no app instalado no iOS)
+- `src/lib/stats.js` — resumo por período (hoje/7/30 dias): entregas, sucesso, km, tempo na rua, motivos (puro, testado)
+- `src/lib/backup.js` — backup/restauração em JSON (sem a chave ORS; fotos como data URL; versão do formato em BACKUP_VERSION)
 - `src/lib/photos.js` — fotos de comprovante no IndexedDB (chave = id da parada)
 - `src/main.js` — UI (abas: Importar, Paradas, Rota, Histórico, Ajustes)
 - `public/sw.js`, `public/manifest.webmanifest` — PWA

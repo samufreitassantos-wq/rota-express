@@ -20,7 +20,20 @@ describe('cliente ORS (fetch simulado)', () => {
   it('optimize converte steps em índices e anexa não atribuídos', async () => {
     const fetchImpl = vi.fn(() => ok({ routes: [{ steps: [{ type: 'start' }, { type: 'job', id: 3 }, { type: 'job', id: 1 }, { type: 'end' }] }] }));
     const stops = [{ lat: 0, lng: 0 }, { lat: 1, lng: 1 }, { lat: 2, lng: 2 }];
-    expect(await orsOptimize({ lat: 0, lng: 0 }, stops, { key: 'k', fetchImpl })).toEqual([2, 0, 1]);
+    expect(await orsOptimize({ lat: 0, lng: 0 }, stops, { key: 'k', fetchImpl })).toEqual({ order: [2, 0, 1], unassigned: 1 });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.jobs[0].time_windows).toBeUndefined();
+    expect(body.vehicles[0].time_window).toBeUndefined();
+  });
+
+  it('optimize envia janelas, tempo de serviço e hora de saída em segundos', async () => {
+    const fetchImpl = vi.fn(() => ok({ routes: [{ steps: [{ type: 'job', id: 1 }, { type: 'job', id: 2 }] }] }));
+    const stops = [{ lat: 0, lng: 0 }, { lat: 1, lng: 1 }];
+    await orsOptimize({ lat: 0, lng: 0 }, stops, { key: 'k', fetchImpl, windows: [{ start: 840, end: 960 }, null], startMin: 480, serviceMin: 3 });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.jobs[0]).toMatchObject({ service: 180, time_windows: [[50400, 57600]] });
+    expect(body.jobs[1].time_windows).toBeUndefined();
+    expect(body.vehicles[0].time_window).toEqual([28800, 172800]);
   });
 
   it('directions divide em blocos de 50 pontos sem duplicar emendas', async () => {
@@ -41,6 +54,16 @@ describe('cliente ORS (fetch simulado)', () => {
     expect(r.order).toEqual([1, 0]);
     expect(r.method).toBe('local');
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('planRoute local respeita janela e avisa atraso inevitável', async () => {
+    const stops = [{ lat: 0, lng: 0.01 }, { lat: 0, lng: 0.05 }];
+    const timing = { speedKmh: 30, serviceMin: 3, detour: 1 };
+    const r = await planRoute({ lat: 0, lng: 0 }, stops, { windows: [null, { start: 0, end: 492 }], startMin: 480, timing });
+    expect(r.order).toEqual([1, 0]);
+    expect(r.warnings).toEqual([]);
+    const late = await planRoute({ lat: 0, lng: 0 }, stops, { windows: [null, { start: 0, end: 482 }], startMin: 480, timing });
+    expect(late.warnings[0]).toContain('1 parada(s) chegariam depois');
   });
 
   it('se a ORS falhar, planRoute cai para o modo local com aviso', async () => {

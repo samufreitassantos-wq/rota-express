@@ -42,18 +42,32 @@ export async function orsGeocode(text, { key, fetchImpl, focus } = {}) {
 
 /**
  * Otimiza a ordem de visita (VROOM via ORS). `start` = {lat,lng}; `stops` = [{lat,lng}].
- * Retorna índices de `stops` na ordem otimizada, seguidos dos não atribuídos.
+ * Opcional: `windows[i]` = {start, end} em minutos para stops[i], `startMin` (hora de saída) e
+ * `serviceMin` (tempo em cada parada). Paradas que não cabem nas janelas vêm em `unassigned`
+ * e são colocadas no fim da ordem.
+ * @returns {{ order: number[], unassigned: number }}
  */
-export async function orsOptimize(start, stops, { key, fetchImpl } = {}) {
+export async function orsOptimize(start, stops, { key, fetchImpl, windows = [], startMin, serviceMin } = {}) {
+  const withTime = windows.some(Boolean) && startMin != null;
   const body = {
-    jobs: stops.map((s, i) => ({ id: i + 1, location: [s.lng, s.lat] })),
-    vehicles: [{ id: 1, profile: 'driving-car', start: [start.lng, start.lat] }],
+    jobs: stops.map((s, i) => ({
+      id: i + 1,
+      location: [s.lng, s.lat],
+      ...(withTime && serviceMin ? { service: Math.round(serviceMin * 60) } : {}),
+      ...(withTime && windows[i] ? { time_windows: [[windows[i].start * 60, windows[i].end * 60]] } : {}),
+    })),
+    vehicles: [{
+      id: 1,
+      profile: 'driving-car',
+      start: [start.lng, start.lat],
+      ...(withTime ? { time_window: [Math.round(startMin * 60), 2 * 86400] } : {}),
+    }],
   };
   const data = await orsFetch('/optimization', { key, fetchImpl, body });
   const steps = data?.routes?.[0]?.steps ?? [];
   const order = steps.filter((s) => s.type === 'job').map((s) => (s.job ?? s.id) - 1);
   const missing = stops.map((_, i) => i).filter((i) => !order.includes(i));
-  return [...order, ...missing];
+  return { order: [...order, ...missing], unassigned: missing.length };
 }
 
 /** Calcula a geometria da rota passando pelos pontos, em blocos. */

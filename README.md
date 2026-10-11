@@ -11,12 +11,15 @@ Aplicativo web (PWA) de roteirização de entregas, pensado para celular e table
 - **Mapa interativo** (Leaflet + OpenStreetMap) com pinos numerados; arraste um pino para corrigir a posição.
 - **Botões Google Maps e Waze** para navegar até cada parada.
 - **Registro de entregas**: "Entregue" ou "Problema" (com motivo: ausente, recusado, local fechado...), horário, observação e **foto de comprovante** (comprimida e guardada no aparelho).
+- **Horário de entrega por parada** (ex.: das 14:00 às 16:00) considerado na otimização (ORS ou local), com **previsão de chegada** ao vivo, término previsto e alerta de atraso. Velocidade média e tempo por parada ajustáveis.
 - **Reordenar paradas** manualmente (▲▼ ou "Fazer a seguir").
 - **Google Maps com as próximas 4 paradas** em um único link.
 - **Histórico** de rotas finalizadas: exportar **CSV** (abre no Excel) e **relatório em PDF** gerado no aparelho (com fotos), pelo menu de compartilhar, reusar endereços, excluir.
+- **Resumo do dia, 7 e 30 dias**: entregas, taxa de sucesso, km, tempo na rua, média por dia, gráfico de entregas por dia e problemas por motivo.
+- **Backup e restauração** de histórico, rota em andamento e fotos em um arquivo (para trocar de aparelho ou se o navegador apagar os dados), com lembrete semanal. A chave do ORS não entra no backup.
 - **PWA instalável** com funcionamento offline da interface.
 
-Tudo fica salvo no aparelho (`localStorage`; fotos no IndexedDB). Não há servidor próprio.
+Tudo fica salvo no aparelho (`localStorage`; fotos no IndexedDB). Não há servidor próprio — por isso, faça backup em **Ajustes → Fazer backup**.
 
 ## Chave do OpenRouteService (opcional, gratuita)
 
