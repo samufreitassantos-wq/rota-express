@@ -20,9 +20,9 @@
       <section id="view-import" class="view" data-view="import">
         <h2>Importar endereços</h2>
         <label class="dropzone" for="pdf-input">
-          <strong>Selecionar PDF(s)</strong>
-          <span class="muted">O texto é lido no próprio aparelho. PDFs escaneados (imagem) ainda não são suportados.</span>
-          <input id="pdf-input" type="file" accept="application/pdf,.pdf" multiple hidden />
+          <strong>Selecionar PDF(s) ou foto do romaneio</strong>
+          <span class="muted">Tudo é lido no próprio aparelho. PDFs escaneados e fotos usam OCR (na 1ª vez baixa ~5 MB do próprio app).</span>
+          <input id="pdf-input" type="file" accept="application/pdf,.pdf,image/*" multiple hidden />
         </label>
         <p class="muted center">ou cole/edite o texto abaixo</p>
         <textarea id="raw-text" rows="10" placeholder="Rua das Flores, 123 - Centro&#10;São Paulo - SP 01310-100"></textarea>

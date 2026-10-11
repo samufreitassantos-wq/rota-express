@@ -2,7 +2,7 @@ import 'leaflet/dist/leaflet.css';
 import './styles/app.css';
 import L from 'leaflet';
 import { extractAddresses, normalizeAddress } from './lib/addressParser.js';
-import { extractPdfText } from './lib/pdf.js';
+import { extractPdfText, extractImageText } from './lib/pdf.js';
 import { geocode } from './lib/geocode.js';
 import { planRoute } from './lib/planner.js';
 import { googleMapsUrl, googleMapsMultiUrl, wazeUrl, MOBILE_MAX_WAYPOINTS } from './lib/navLinks.js';
@@ -71,12 +71,25 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
 // ---------- Importação ----------
 $('#pdf-input').addEventListener('change', async (e) => {
   const files = [...e.target.files];
+  e.target.value = '';
   if (!files.length) return;
-  setStatus('#import-status', `Lendo ${files.length} PDF(s)...`);
   const texts = [];
-  for (const f of files) {
+  let ocrUsed = false;
+  for (const [i, f] of files.entries()) {
+    const label = files.length > 1 ? `${f.name} (${i + 1}/${files.length})` : f.name;
+    const onProgress = ({ page, pages, ocr, progress }) => setStatus('#import-status', ocr
+      ? `Lendo texto da imagem — ${label}, página ${page}/${pages}: ${Math.round(progress * 100)}%`
+      : `Lendo ${label}, página ${page}/${pages}...`);
+    setStatus('#import-status', `Lendo ${label}...`);
     try {
-      texts.push(await extractPdfText(f));
+      if (f.type.startsWith('image/')) {
+        texts.push(await extractImageText(f, { onProgress }));
+        ocrUsed = true;
+      } else {
+        const { text, ocrPages } = await extractPdfText(f, { onProgress });
+        texts.push(text);
+        ocrUsed ||= ocrPages > 0;
+      }
     } catch (err) {
       setStatus('#import-status', `Erro ao ler ${f.name}: ${err.message}`, 'error');
       return;
@@ -84,12 +97,11 @@ $('#pdf-input').addEventListener('change', async (e) => {
   }
   const text = texts.join('\n');
   $('#raw-text').value = text;
-  e.target.value = '';
   if (!text.trim()) {
-    setStatus('#import-status', 'Nenhum texto encontrado. O PDF pode ser uma imagem escaneada.', 'error');
+    setStatus('#import-status', 'Nenhum texto encontrado no arquivo.', 'error');
     return;
   }
-  importAddresses(extractAddresses(text).map((a) => a.address));
+  importAddresses(extractAddresses(text).map((a) => a.address), ocrUsed);
 });
 
 $('#btn-extract').addEventListener('click', () => {
@@ -100,7 +112,7 @@ $('#btn-one-per-line').addEventListener('click', () => {
   importAddresses(lines);
 });
 
-function importAddresses(addresses) {
+function importAddresses(addresses, ocrUsed = false) {
   const existing = new Set(route.stops.map((s) => s.address.toLowerCase()));
   const fresh = addresses.filter((a) => !existing.has(a.toLowerCase()));
   if (!fresh.length) {
@@ -112,6 +124,7 @@ function importAddresses(addresses) {
   persist();
   setStatus('#import-status', `${fresh.length} endereço(s) adicionados. Revise na aba Paradas.`, 'ok');
   showTab('stops');
+  if (ocrUsed) setStatus('#stops-status', 'Texto lido de imagem (OCR): confira números e nomes de rua antes de otimizar.', 'warn');
 }
 
 // ---------- Paradas ----------

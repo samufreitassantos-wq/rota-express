@@ -30,7 +30,7 @@ button:active, .btn:active { transform: scale(.98); }
 .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .row input { flex: 1 1 200px; }
 .dropzone { display: flex; flex-direction: column; gap: 6px; align-items: center; text-align: center; padding: 24px 16px; border: 2px dashed var(--primary); border-radius: 14px; background: var(--surface); cursor: pointer; font-weight: 400; }
-.status { min-height: 1.4em; margin: 6px 0; } .status.ok { color: var(--ok); } .status.error { color: var(--danger); }
+.status { min-height: 1.4em; margin: 6px 0; } .status.ok { color: var(--ok); } .status.error { color: var(--danger); } .status.warn { color: var(--warn); }
 .badge { background: var(--primary); color: #fff; border-radius: 999px; padding: 1px 9px; font-size: .85rem; vertical-align: middle; }
 .list { list-style: none; padding: 0; margin: 0; }
 .stop { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 10px; padding: 8px; margin-bottom: 8px; }
