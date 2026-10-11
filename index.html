@@ -67,6 +67,10 @@
 
       <section id="view-history" class="view" data-view="history" hidden>
         <h2>Histórico</h2>
+        <div id="backup-reminder" class="card warn-card" hidden>
+          <span id="backup-reminder-text"></span>
+          <div class="row"><button id="btn-backup-reminder" class="primary">Fazer backup agora</button></div>
+        </div>
         <ul id="history-list" class="list"></ul>
       </section>
 
@@ -86,6 +90,21 @@
             <button id="btn-clear-cache">Limpar cache de endereços</button>
           </div>
           <p id="settings-status" class="status"></p>
+        </div>
+        <div class="card">
+          <label>Backup</label>
+          <p class="muted small">
+            Os dados ficam só neste aparelho. Faça backup para não perder o histórico e as fotos
+            (troca de aparelho, limpeza do navegador). A chave do OpenRouteService não entra no backup.
+          </p>
+          <p id="backup-info" class="small"></p>
+          <div class="row">
+            <button id="btn-backup" class="primary">Fazer backup</button>
+            <label class="btn">Restaurar backup
+              <input id="restore-input" type="file" accept="application/json,.json" hidden />
+            </label>
+          </div>
+          <p id="backup-status" class="status"></p>
         </div>
         <div class="card">
           <button id="btn-new-route" class="danger">Nova rota (limpa a atual)</button>

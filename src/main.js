@@ -11,6 +11,7 @@ import { orsDirections } from './lib/ors.js';
 import { haversine } from './lib/geo.js';
 import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from './lib/delivery.js';
 import { getPhoto, putPhoto, deletePhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
+import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from './lib/backup.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -61,6 +62,7 @@ function showTab(name) {
   if (name === 'settings') {
     $('#ors-key').value = settings.orsKey;
     $('#default-city').value = settings.defaultCity;
+    renderBackupInfo();
   }
 }
 document.querySelector('.tabbar').addEventListener('click', (e) => {
@@ -568,7 +570,17 @@ $('#btn-finish').addEventListener('click', () => {
 });
 
 // ---------- Histórico ----------
+const BACKUP_REMIND_DAYS = 7;
+
 function renderHistory() {
+  const last = settings.lastBackupAt ? Date.parse(settings.lastBackupAt) : 0;
+  const overdue = history.length > 0 && Date.now() - last > BACKUP_REMIND_DAYS * 864e5;
+  $('#backup-reminder').hidden = !overdue;
+  if (overdue) {
+    $('#backup-reminder-text').textContent = last
+      ? `Último backup em ${new Date(last).toLocaleDateString('pt-BR')}. Faça um novo para não perder rotas e fotos.`
+      : 'Você ainda não fez backup. Se o navegador apagar os dados, o histórico e as fotos se perdem.';
+  }
   $('#history-list').innerHTML = history.map((h) => {
     const st = routeStats(h.plan ? orderedStops(h) : h.stops);
     return `<li data-id="${h.id}" class="card">
@@ -626,6 +638,85 @@ $('#btn-clear-cache').addEventListener('click', () => {
   remove('geocache');
   setStatus('#settings-status', 'Cache de endereços limpo.', 'ok');
 });
+// ---------- Backup ----------
+function renderBackupInfo() {
+  $('#backup-info').textContent = settings.lastBackupAt
+    ? `Último backup: ${new Date(settings.lastBackupAt).toLocaleString('pt-BR')}`
+    : 'Nenhum backup feito ainda.';
+}
+
+async function makeBackup(button) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Preparando...';
+  try {
+    const photos = {};
+    for (const id of photoIds(route, history)) {
+      const blob = await getPhoto(id).catch(() => null);
+      if (blob) photos[id] = await blobToDataUrl(blob);
+    }
+    const data = buildBackup({ settings, current: route, history, photos });
+    const file = new File([JSON.stringify(data)], backupFileName(), { type: 'application/json' });
+    await shareOrDownload(file);
+    settings.lastBackupAt = data.exportedAt;
+    save('settings', settings);
+    renderBackupInfo();
+    if (!$('#view-history').hidden) renderHistory();
+    setStatus('#backup-status', `Backup gerado (${history.length} rota(s), ${Object.keys(photos).length} foto(s), ${(file.size / 1024).toFixed(0)} KB). Guarde o arquivo em Arquivos/Drive.`, 'ok');
+  } catch (err) {
+    setStatus('#backup-status', `Erro ao gerar backup: ${err.message}`, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+$('#btn-backup').addEventListener('click', (e) => makeBackup(e.target));
+$('#btn-backup-reminder').addEventListener('click', (e) => makeBackup(e.target));
+
+$('#restore-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const b = parseBackup(await file.text());
+    const { history: merged, added } = mergeHistory(history, b.history, HISTORY_MAX);
+    const when = b.exportedAt ? ` de ${new Date(b.exportedAt).toLocaleString('pt-BR')}` : '';
+    const hasCurrent = b.current?.stops.length > 0 && b.current.id !== route.id;
+    if (!confirm(`Restaurar backup${when}?\n\n• ${added} rota(s) nova(s) no histórico\n• ${b.history.length - added} já existiam (mantidas)${hasCurrent ? `\n• rota em andamento com ${b.current.stops.length} parada(s)` : ''}`)) return;
+
+    let replaceCurrent = false;
+    if (hasCurrent) {
+      replaceCurrent = !route.stops.length || confirm('Substituir a rota atual deste aparelho pela rota em andamento do backup?');
+    }
+    // Fotos só das rotas que realmente entram no aparelho.
+    const keptIds = new Set(photoIds(replaceCurrent ? b.current : null, merged));
+    let restoredPhotos = 0;
+    for (const [id, url] of Object.entries(b.photos)) {
+      if (!keptIds.has(id)) continue;
+      await putPhoto(id, await (await fetch(url)).blob());
+      restoredPhotos++;
+    }
+    if (restoredPhotos) requestPersistence();
+    history = merged;
+    save('history', history);
+    if (replaceCurrent) {
+      await discardCurrentPhotos();
+      route = b.current;
+      fittedPlan = null;
+      persist();
+    }
+    if (!settings.defaultCity && b.settings.defaultCity) {
+      settings.defaultCity = b.settings.defaultCity;
+      save('settings', settings);
+      $('#default-city').value = settings.defaultCity;
+    }
+    setStatus('#backup-status', `Backup restaurado: ${added} rota(s) adicionada(s), ${restoredPhotos} foto(s)${replaceCurrent ? ', rota atual substituída' : ''}.`, 'ok');
+  } catch (err) {
+    setStatus('#backup-status', err.message, 'error');
+  }
+});
+
 $('#btn-new-route').addEventListener('click', async () => {
   if (route.stops.length && !confirm('Descartar a rota atual (não finalizada)?')) return;
   await discardCurrentPhotos();

@@ -75,3 +75,4 @@ button:active, .btn:active { transform: scale(.98); }
 .extra textarea { font-family: inherit; font-size: .95rem; }
 .thumb { display: block; max-width: 100%; max-height: 220px; margin-top: 8px; border-radius: 8px; }
 #route-summary .actions .btn, #route-summary .actions button { font-size: .9rem; }
+.warn-card { border-color: var(--warn); }

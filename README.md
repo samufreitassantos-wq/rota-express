@@ -14,9 +14,10 @@ Aplicativo web (PWA) de roteirização de entregas, pensado para celular e table
 - **Reordenar paradas** manualmente (▲▼ ou "Fazer a seguir").
 - **Google Maps com as próximas 4 paradas** em um único link.
 - **Histórico** de rotas finalizadas: exportar **CSV** (abre no Excel) e **relatório em PDF** gerado no aparelho (com fotos), pelo menu de compartilhar, reusar endereços, excluir.
+- **Backup e restauração** de histórico, rota em andamento e fotos em um arquivo (para trocar de aparelho ou se o navegador apagar os dados), com lembrete semanal. A chave do ORS não entra no backup.
 - **PWA instalável** com funcionamento offline da interface.
 
-Tudo fica salvo no aparelho (`localStorage`; fotos no IndexedDB). Não há servidor próprio.
+Tudo fica salvo no aparelho (`localStorage`; fotos no IndexedDB). Não há servidor próprio — por isso, faça backup em **Ajustes → Fazer backup**.
 
 ## Chave do OpenRouteService (opcional, gratuita)
 
