@@ -26,6 +26,7 @@ async function tx(mode, fn) {
 
 export const getPhoto = (id) => tx('readonly', (s) => s.get(id));
 export const putPhoto = (id, blob) => tx('readwrite', (s) => s.put(blob, id));
+export const clearPhotos = () => tx('readwrite', (s) => s.clear());
 export const deletePhotos = (ids) => (ids.length ? tx('readwrite', (s) => ids.forEach((id) => s.delete(id))) : Promise.resolve());
 
 /** Reduz a foto para no máximo `maxSide` px e converte em JPEG. */

@@ -20,7 +20,9 @@ Aplicativo web (PWA) de roteirização de entregas, pensado para celular e table
 - **Backup e restauração** de histórico, rota em andamento e fotos em um arquivo (para trocar de aparelho ou se o navegador apagar os dados), com lembrete semanal. A chave do ORS não entra no backup.
 - **PWA instalável** com funcionamento offline da interface.
 
-Tudo fica salvo no aparelho (`localStorage`; fotos no IndexedDB). Não há servidor próprio — por isso, faça backup em **Ajustes → Fazer backup**.
+- **Equipe com login (opcional, Supabase gratuito)**: cada entregador entra com o e-mail (código de 6 dígitos) e vê só o próprio histórico; o **administrador** libera acessos e vê rotas, históricos e fotos de todos (aba Equipe), com exportação CSV/PDF. Funciona sem internet e sincroniza quando a conexão volta. Passo a passo: [`docs/CONFIGURAR-NUVEM.md`](docs/CONFIGURAR-NUVEM.md).
+
+Sem a nuvem configurada, tudo fica salvo só no aparelho (`localStorage`; fotos no IndexedDB) — por isso, faça backup em **Ajustes → Fazer backup**.
 
 ## Chave do OpenRouteService (opcional, gratuita)
 

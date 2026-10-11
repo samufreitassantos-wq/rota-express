@@ -8,6 +8,7 @@
   :root { --bg: #0b1220; --surface: #111a2b; --text: #e5e7eb; --muted: #9ca3af; --border: #334155; --ok: #4ade80; --danger: #f87171; --warn: #fbbf24; }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body { font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
 .topbar { position: sticky; top: 0; z-index: 1000; display: flex; gap: 12px; align-items: baseline; padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; background: var(--primary); color: #fff; }
@@ -112,3 +113,27 @@ label.grow { flex: 1 1 160px; font-weight: 600; }
   box-shadow: 0 4px 16px rgba(0,0,0,.25); font-weight: 600; }
 #gps-status:empty { display: none; }
 #gps-status { margin-top: 4px; }
+
+/* ---- Conta / login ---- */
+.sync-badge { margin-left: auto; min-height: 36px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.5);
+  background: rgba(255,255,255,.15); color: #fff; font-size: .85rem; }
+.sync-badge.warn { background: #b45309; border-color: #b45309; }
+body.locked { overflow: hidden; }
+.auth { position: fixed; inset: 0; z-index: 3000; background: var(--bg); display: grid; place-items: center; padding: 16px; overflow-y: auto; }
+.auth-card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+.auth-card h1 { margin: 0 0 16px; color: var(--primary); font-size: 1.5rem; }
+.auth-card form { display: flex; flex-direction: column; gap: 10px; }
+button.wide { width: 100%; margin-top: 8px; }
+input.code { font-size: 1.6rem; letter-spacing: .4em; text-align: center; font-variant-numeric: tabular-nums; }
+/* ---- Equipe ---- */
+.table-wrap { overflow-x: auto; }
+table.team { width: 100%; border-collapse: collapse; font-size: .9rem; }
+table.team th, table.team td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.team th { font-size: .8rem; color: var(--muted); font-weight: 600; }
+table.team tbody tr { cursor: pointer; }
+table.team tbody tr:hover { background: var(--bg); }
+table.team tr.inactive { opacity: .6; }
+.tag-role { font-size: .72rem; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.t-stop-list { margin: 8px 0 0; padding-left: 22px; font-size: .9rem; }
+.t-stop-list li { padding: 3px 0; }
+#allow-form select { margin-left: 0; }
