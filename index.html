@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="description" content="Roteirização de entregas: importe PDFs, otimize rotas e registre entregas." />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <title>Rota Express</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Rota Express</h1>
+      <span id="route-name" class="muted"></span>
+    </header>
+
+    <main>
+      <section id="view-import" class="view" data-view="import">
+        <h2>Importar endereços</h2>
+        <label class="dropzone" for="pdf-input">
+          <strong>Selecionar PDF(s)</strong>
+          <span class="muted">O texto é lido no próprio aparelho. PDFs escaneados (imagem) ainda não são suportados.</span>
+          <input id="pdf-input" type="file" accept="application/pdf,.pdf" multiple hidden />
+        </label>
+        <p class="muted center">ou cole/edite o texto abaixo</p>
+        <textarea id="raw-text" rows="10" placeholder="Rua das Flores, 123 - Centro&#10;São Paulo - SP 01310-100"></textarea>
+        <div class="row">
+          <button id="btn-extract" class="primary">Extrair endereços</button>
+          <button id="btn-one-per-line">Usar 1 linha = 1 endereço</button>
+        </div>
+        <p id="import-status" class="status"></p>
+      </section>
+
+      <section id="view-stops" class="view" data-view="stops" hidden>
+        <h2>Paradas <span id="stops-count" class="badge"></span></h2>
+        <div class="card">
+          <label>Ponto de partida</label>
+          <div class="row">
+            <input id="start-input" placeholder="Endereço de partida" />
+            <button id="btn-start-gps" title="Usar minha localização">📍 GPS</button>
+          </div>
+          <p id="start-status" class="muted small"></p>
+        </div>
+        <div class="row">
+          <button id="btn-geocode" class="primary">Localizar endereços</button>
+          <button id="btn-add-stop">+ Adicionar</button>
+          <button id="btn-optimize" class="accent">Otimizar rota</button>
+        </div>
+        <p id="stops-status" class="status"></p>
+        <ol id="stops-list" class="list"></ol>
+      </section>
+
+      <section id="view-route" class="view" data-view="route" hidden>
+        <div class="route-layout">
+          <div id="map"></div>
+          <div class="route-side">
+            <div id="route-summary" class="card small"></div>
+            <ol id="route-list" class="list"></ol>
+            <div class="row">
+              <button id="btn-finish" class="accent">Finalizar e salvar no histórico</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-history" class="view" data-view="history" hidden>
+        <h2>Histórico</h2>
+        <ul id="history-list" class="list"></ul>
+      </section>
+
+      <section id="view-settings" class="view" data-view="settings" hidden>
+        <h2>Ajustes</h2>
+        <div class="card">
+          <label for="ors-key">Chave do OpenRouteService (opcional)</label>
+          <input id="ors-key" type="password" autocomplete="off" placeholder="Cole sua chave gratuita aqui" />
+          <p class="muted small">
+            Fica salva somente neste aparelho. Crie uma gratuita em openrouteservice.org.
+            Sem chave: busca de endereços pelo Nominatim (OSM) e otimização local em linha reta.
+          </p>
+          <label for="default-city">Cidade padrão para busca</label>
+          <input id="default-city" placeholder="Ex.: São Paulo - SP" />
+          <div class="row">
+            <button id="btn-save-settings" class="primary">Salvar</button>
+            <button id="btn-clear-cache">Limpar cache de endereços</button>
+          </div>
+          <p id="settings-status" class="status"></p>
+        </div>
+        <div class="card">
+          <button id="btn-new-route" class="danger">Nova rota (limpa a atual)</button>
+        </div>
+        <p class="muted small">Mapa © colaboradores do OpenStreetMap. Rotas © openrouteservice.org.</p>
+      </section>
+    </main>
+
+    <nav class="tabbar">
+      <button data-tab="import" class="active">📄<span>Importar</span></button>
+      <button data-tab="stops">📋<span>Paradas</span></button>
+      <button data-tab="route">🗺️<span>Rota</span></button>
+      <button data-tab="history">🕘<span>Histórico</span></button>
+      <button data-tab="settings">⚙️<span>Ajustes</span></button>
+    </nav>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
