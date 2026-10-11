@@ -13,6 +13,7 @@ import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, t
 import { getPhoto, putPhoto, deletePhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
 import { stopWindow, hasWindows, simulate, fmtHHMM, nowMinutes, DEFAULTS as TIMING_DEFAULTS } from './lib/timeWindows.js';
 import { summarize } from './lib/stats.js';
+import { newTracking, ingestFix, observedSpeedKmh, observedServiceMin, isArrived, isFresh, distanceTo, fmtDistance, FAR_FROM_STOP_M } from './lib/tracking.js';
 import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from './lib/backup.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -21,10 +22,17 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const HISTORY_MAX = 50;
 
 const settings = load('settings', { orsKey: '', defaultCity: '' });
-const timing = () => ({
+const configuredTiming = () => ({
   speedKmh: Number(settings.speedKmh) || TIMING_DEFAULTS.speedKmh,
   serviceMin: Number(settings.serviceMin ?? TIMING_DEFAULTS.serviceMin),
 });
+/** Velocidade e tempo por parada: reais (medidos pelo GPS nesta rota) quando já há dados suficientes. */
+function timing() {
+  const t = configuredTiming();
+  const speed = observedSpeedKmh(route?.tracking);
+  const service = observedServiceMin(route?.stops ?? []);
+  return { speedKmh: speed ?? t.speedKmh, serviceMin: service ?? t.serviceMin, observedSpeed: speed, observedService: service };
+}
 let route = load('current', null) ?? newRoute();
 let history = load('history', []);
 // Dados salvos pela versão anterior usavam delivered/deliveredAt.
@@ -343,7 +351,8 @@ const fmtHour = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-di
  */
 function liveSchedule(stops) {
   const done = stops.filter((s) => s.outcome).sort((a, b) => Date.parse(a.outcomeAt) - Date.parse(b.outcomeAt));
-  const from = done.at(-1) ?? route.plan.start;
+  const fix = route.tracking?.active && route.tracking.last;
+  const from = isFresh(fix) ? fix : done.at(-1) ?? route.plan.start;
   const pending = stops.filter((s) => !s.outcome);
   if (!from || !pending.length) return { byId: {}, end: null, lateCount: 0 };
   const sim = simulate([from, ...pending], [null, ...pending.map(stopWindow)], nowMinutes(), timing());
@@ -369,9 +378,12 @@ function etaLine(s, eta) {
 }
 
 function outcomeLine(s) {
-  if (s.outcome === 'delivered') return `<div class="muted small">Entregue às ${fmtHour(s.outcomeAt)}</div>`;
-  if (s.outcome === 'failed') return `<div class="small fail-text">Problema às ${fmtHour(s.outcomeAt)}</div>`;
-  return '';
+  const arrived = s.arrivedAt ? `Chegou às ${fmtHour(s.arrivedAt)} · ` : '';
+  const far = s.outcomeDistM > FAR_FROM_STOP_M
+    ? `<div class="small warn">📍 Marcado a ${fmtDistance(s.outcomeDistM)} do endereço</div>` : '';
+  if (s.outcome === 'delivered') return `<div class="muted small">${arrived}Entregue às ${fmtHour(s.outcomeAt)}</div>${far}`;
+  if (s.outcome === 'failed') return `<div class="small fail-text">${arrived}Problema às ${fmtHour(s.outcomeAt)}</div>${far}`;
+  return s.arrivedAt ? `<div class="small ok-text">📍 Chegou às ${fmtHour(s.arrivedAt)}</div>` : '';
 }
 
 function stopItem(s, i, next, openIds, eta) {
@@ -394,7 +406,7 @@ function stopItem(s, i, next, openIds, eta) {
     <div class="num">${i + 1}</div>
     <div class="body">
       <div class="addr">${esc(s.address)}</div>
-      ${s.outcome ? outcomeLine(s) : etaLine(s, eta)}
+      ${s.outcome ? outcomeLine(s) : outcomeLine(s) + etaLine(s, eta)}
       <div class="actions">
         <a class="btn" href="${googleMapsUrl(s)}" target="_blank" rel="noopener">Google Maps</a>
         <a class="btn" href="${wazeUrl(s)}" target="_blank" rel="noopener">Waze</a>
@@ -440,10 +452,14 @@ function renderRoute() {
     <div><b>${st.delivered}/${st.total}</b> entregues${st.failed ? ` · <span class="fail-text">${st.failed} com problema</span>` : ''} · ${fmtKm(p.distance)} · ${fmtDur(p.duration)}</div>
     <div class="progress"><span style="width:${(st.delivered / st.total) * 100}%"></span><span class="failed" style="width:${(st.failed / st.total) * 100}%"></span></div>
     ${sched.end != null ? `<div>Término previsto ~<b>${fmtHHMM(sched.end)}</b>${sched.lateCount ? ` · <span class="fail-text">⚠ ${sched.lateCount} parada(s) com atraso previsto</span>` : ''}</div>` : ''}
+    <div id="gps-status" class="small"></div>
     ${p.windowsChanged ? '<div class="warn">Horários mudaram depois da otimização: em Paradas, toque em "Otimizar rota" de novo.</div>' : ''}
     <div class="muted">Otimização: ${p.method === 'ors' ? 'OpenRouteService' : 'local (linha reta)'}${p.manual ? ' · ordem ajustada manualmente' : ''}${p.roadGeometry ? '' : ' · traçado aproximado'}</div>
     ${(p.warnings ?? []).map((w) => `<div class="warn">${esc(w)}</div>`).join('')}
     <div class="actions">
+      ${reorderMode ? '' : route.tracking?.active
+        ? '<button id="btn-gps-stop">⏸ Pausar GPS</button><button id="btn-gps-center">📍 Onde estou</button>'
+        : '<button id="btn-gps-start" class="accent">▶ Iniciar rota (GPS)</button>'}
       ${multi && !reorderMode ? `<a class="btn primary" href="${multi}" target="_blank" rel="noopener">Google Maps: próximas ${Math.min(pendingStops.length, MOBILE_MAX_WAYPOINTS + 1)}</a>` : ''}
       <button id="btn-reorder" class="${reorderMode ? 'accent' : ''}">${reorderMode ? 'Concluir reordenação' : '↕ Reordenar'}</button>
       ${!p.roadGeometry && settings.orsKey && !reorderMode ? '<button id="btn-redraw">Recalcular traçado</button>' : ''}
@@ -455,6 +471,7 @@ function renderRoute() {
   loadThumbs();
 
   if (p.start) L.circleMarker([p.start.lat, p.start.lng], { radius: 8, color: '#1d4ed8', fillOpacity: 0.9 }).bindTooltip('Partida').addTo(layer);
+  setTimeout(updateGpsView, 0);
   L.polyline(p.geometry, { color: '#0f766e', weight: 4, opacity: 0.8, dashArray: p.roadGeometry ? null : '6 6' }).addTo(layer);
   stops.forEach((s, i) => {
     const icon = L.divIcon({ className: `pin ${s.outcome === 'delivered' ? 'done' : s.outcome ?? ''} ${s === next ? 'next' : ''}`, html: `<span>${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
@@ -505,7 +522,15 @@ function applyManualOrder(order) {
 
 $('#route-summary').addEventListener('click', async (e) => {
   const id = e.target.id;
-  if (id === 'btn-reorder') {
+  if (id === 'btn-gps-start') {
+    startGps();
+  } else if (id === 'btn-gps-stop') {
+    stopGps();
+  } else if (id === 'btn-gps-center') {
+    const fix = route.tracking?.last;
+    if (isFresh(fix)) map.setView([fix.lat, fix.lng], 16);
+    else toast('Ainda sem posição do GPS.');
+  } else if (id === 'btn-reorder') {
     reorderMode = !reorderMode;
     renderRoute();
   } else if (id === 'btn-export-csv') {
@@ -537,11 +562,17 @@ $('#route-list').addEventListener('click', async (e) => {
     s.outcome = cls.contains('set-delivered') ? 'delivered' : 'failed';
     s.outcomeAt = new Date().toISOString();
     if (s.outcome === 'failed') s.failReason ??= FAIL_REASONS[0];
+    const fix = route.tracking?.active && route.tracking.lastSeen;
+    if (isFresh(fix)) {
+      s.outcomeFix = { lat: fix.lat, lng: fix.lng, acc: fix.acc };
+      s.outcomeDistM = Math.round(distanceTo(fix, s));
+      if (!s.arrivedAt && isArrived(fix, s)) s.arrivedAt = s.outcomeAt;
+    }
     persist();
     renderRoute();
   } else if (cls.contains('undo')) {
     s.outcome = null;
-    s.outcomeAt = undefined;
+    s.outcomeAt = s.outcomeFix = s.outcomeDistM = undefined;
     persist();
     renderRoute();
   } else if (cls.contains('mv-up') || cls.contains('mv-down')) {
@@ -585,6 +616,134 @@ $('#route-list').addEventListener('change', async (e) => {
     }
     renderRoute();
   }
+});
+
+// ---------- GPS ----------
+let watchId = null;
+let wakeLock = null;
+let gpsMarker = null;
+let gpsCircle = null;
+let gpsError = '';
+let lastSave = 0;
+let lastRender = 0;
+
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => (el.hidden = true), 5000);
+}
+
+async function keepScreenOn() {
+  try {
+    if (navigator.wakeLock && document.visibilityState === 'visible' && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => (wakeLock = null));
+    }
+  } catch { /* não suportado ou recusado */ }
+}
+
+function startGps({ resume = false } = {}) {
+  if (!navigator.geolocation) {
+    gpsError = 'GPS indisponível neste navegador.';
+    return renderRoute();
+  }
+  route.tracking = { ...newTracking(), ...route.tracking, active: true };
+  route.tracking.startedAt ??= new Date().toISOString();
+  persist();
+  if (watchId == null) {
+    watchId = navigator.geolocation.watchPosition(onFix, onGpsError, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+  }
+  keepScreenOn();
+  if (!resume) renderRoute();
+}
+
+function stopGps({ silent = false } = {}) {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
+  if (route.tracking) route.tracking.active = false;
+  persist();
+  if (!silent) renderRoute();
+}
+
+function onGpsError(err) {
+  gpsError = err.code === 1
+    ? 'Localização bloqueada. No iPhone/iPad: Ajustes › Privacidade › Serviços de Localização › Safari (ou Sites do Safari) › "Ao Usar o App". Depois toque em Iniciar de novo.'
+    : `Sem sinal de GPS (${err.message}). Continuando a tentar...`;
+  if (err.code === 1) stopGps({ silent: true });
+  if (!$('#view-route').hidden) renderRoute();
+}
+
+function onFix(pos) {
+  if (!route.tracking?.active) return stopGps({ silent: true }); // rota trocada/finalizada
+  const fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy), t: pos.timestamp || Date.now() };
+  gpsError = '';
+  route.tracking = ingestFix(route.tracking ?? newTracking(), fix);
+  // Chegada: qualquer parada pendente dentro do raio (o entregador pode mudar a ordem).
+  const arrivedNow = [];
+  for (const s of orderedStops()) {
+    if (!s.outcome && !s.arrivedAt && isArrived(fix, s)) {
+      s.arrivedAt = new Date(fix.t).toISOString();
+      arrivedNow.push(s);
+    }
+  }
+  const now = Date.now();
+  if (arrivedNow.length || now - lastSave > 15000) {
+    persist();
+    lastSave = now;
+  }
+  if (arrivedNow.length) {
+    const pos = route.plan.order.indexOf(arrivedNow[0].id) + 1;
+    toast(`📍 Chegou na parada ${pos}: ${arrivedNow[0].address}`);
+  }
+  if ($('#view-route').hidden) return;
+  // A lista (previsões) é redesenhada no máximo a cada 30 s; o ponto no mapa, a cada leitura.
+  if (arrivedNow.length || now - lastRender > 30000) {
+    lastRender = now;
+    renderRoute();
+  } else {
+    updateGpsView();
+  }
+}
+
+function updateGpsView() {
+  const t = route.tracking;
+  const el = $('#gps-status');
+  if (el) {
+    const tm = timing();
+    const parts = [];
+    if (t?.active) {
+      const seen = t.lastSeen;
+      parts.push(seen ? `📍 GPS ativo · precisão ${seen.acc} m${seen.acc > 60 ? ' (sinal fraco)' : ''}` : '📍 GPS ativo · aguardando sinal...');
+    }
+    if (t?.meters > 0) parts.push(`${fmtDistance(t.meters)} rodados`);
+    if (tm.observedSpeed) parts.push(`velocidade real ${Math.round(tm.observedSpeed)} km/h`);
+    if (tm.observedService) parts.push(`~${Math.round(tm.observedService)} min por parada`);
+    el.innerHTML = [parts.join(' · '), gpsError && `<span class="fail-text">${esc(gpsError)}</span>`].filter(Boolean).join('<br>');
+  }
+  if (!map) return;
+  const fix = route.tracking?.active && route.tracking.last;
+  if (!isFresh(fix)) {
+    gpsMarker?.remove();
+    gpsCircle?.remove();
+    gpsMarker = gpsCircle = null;
+    return;
+  }
+  const ll = [fix.lat, fix.lng];
+  if (!gpsMarker) {
+    gpsCircle = L.circle(ll, { radius: fix.acc, color: '#1d4ed8', weight: 1, fillOpacity: 0.12 }).addTo(map);
+    gpsMarker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#1d4ed8', fillOpacity: 1 }).bindTooltip('Você').addTo(map);
+  } else {
+    gpsMarker.setLatLng(ll);
+    gpsCircle.setLatLng(ll).setRadius(fix.acc);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && route.tracking?.active) keepScreenOn();
 });
 
 // ---------- Exportação ----------
@@ -646,6 +805,7 @@ $('#btn-finish').addEventListener('click', () => {
   if (!route.plan) return;
   if (!confirm('Finalizar a rota e salvá-la no histórico?')) return;
   route.finishedAt = new Date().toISOString();
+  stopGps({ silent: true });
   archive(route);
   route = newRoute();
   reorderMode = false;
@@ -764,9 +924,10 @@ $('#history-list').addEventListener('click', async (e) => {
   } else if (cls.contains('reuse')) {
     if (route.stops.length && !confirm('Substituir as paradas da rota atual?')) return;
     await discardCurrentPhotos();
+    stopGps({ silent: true });
     route = newRoute();
     route.start = h.start;
-    route.stops = h.stops.map(({ id, outcome, outcomeAt, failReason, note, hasPhoto, ...rest }) => ({ ...rest, id: uid(), outcome: null }));
+    route.stops = h.stops.map(({ id, outcome, outcomeAt, failReason, note, hasPhoto, arrivedAt, outcomeFix, outcomeDistM, ...rest }) => ({ ...rest, id: uid(), outcome: null }));
     persist();
     showTab('stops');
   }
@@ -858,6 +1019,7 @@ $('#restore-input').addEventListener('change', async (e) => {
     save('history', history);
     if (replaceCurrent) {
       await discardCurrentPhotos();
+      stopGps({ silent: true });
       route = b.current;
       fittedPlan = null;
       persist();
@@ -876,6 +1038,7 @@ $('#restore-input').addEventListener('change', async (e) => {
 $('#btn-new-route').addEventListener('click', async () => {
   if (route.stops.length && !confirm('Descartar a rota atual (não finalizada)?')) return;
   await discardCurrentPhotos();
+  stopGps({ silent: true });
   route = newRoute();
   reorderMode = false;
   persist();
@@ -890,3 +1053,5 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 persist();
 showTab(route.plan ? 'route' : route.stops.length ? 'stops' : 'import');
+// Rota com GPS ligado quando o app foi fechado: retoma (a permissão já foi dada).
+if (route.tracking?.active) startGps({ resume: true });

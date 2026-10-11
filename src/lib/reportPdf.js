@@ -3,9 +3,11 @@
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 import { OUTCOME_LABEL, routeStats } from './delivery.js';
+import { FAR_FROM_STOP_M, fmtDistance } from './tracking.js';
 
 const PHOTO_W = 34; // mm
 const PHOTO_MAX_H = 34;
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '');
 
 export function reportRows(stops) {
@@ -13,8 +15,8 @@ export function reportRows(stops) {
     String(i + 1),
     s.address,
     (OUTCOME_LABEL[s.outcome] ?? 'Pendente') + (s.outcome === 'failed' && s.failReason ? `\n${s.failReason}` : ''),
-    fmtDateTime(s.outcomeAt),
-    s.note ?? '',
+    [s.arrivedAt && `Chegou ${fmtTime(s.arrivedAt)}`, s.outcomeAt && fmtDateTime(s.outcomeAt)].filter(Boolean).join('\n'),
+    [s.note, s.outcomeDistM > FAR_FROM_STOP_M && `Marcado a ${fmtDistance(s.outcomeDistM)} do endereço`].filter(Boolean).join('\n'),
     '',
   ]);
 }
@@ -31,7 +33,8 @@ export function buildReportPdf(route, stops, photos = {}) {
   doc.setFontSize(10);
   const summary = [
     `${st.delivered} entregues · ${st.failed} com problema · ${st.pending} pendentes`,
-    route.plan ? `${(route.plan.distance / 1000).toFixed(1)} km` : '',
+    route.tracking?.meters > 500 ? `${fmtDistance(route.tracking.meters)} rodados (GPS)`
+      : route.plan ? `${(route.plan.distance / 1000).toFixed(1)} km` : '',
     route.finishedAt ? `finalizada em ${fmtDateTime(route.finishedAt)}` : '',
   ].filter(Boolean).join(' · ');
   doc.text(summary, 14, 23);

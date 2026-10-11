@@ -15,6 +15,7 @@ Aplicativo web (PWA) de roteirização de entregas, pensado para celular e table
 - **Reordenar paradas** manualmente (▲▼ ou "Fazer a seguir").
 - **Google Maps com as próximas 4 paradas** em um único link.
 - **Histórico** de rotas finalizadas: exportar **CSV** (abre no Excel) e **relatório em PDF** gerado no aparelho (com fotos), pelo menu de compartilhar, reusar endereços, excluir.
+- **Rastreamento por GPS** ("Iniciar rota"): posição no mapa, km realmente rodados, **registro automático da chegada** em cada parada, local onde a entrega foi marcada (com aviso se longe do endereço) e previsão de término baseada na posição, velocidade e tempo por parada reais. A localização fica só no aparelho.
 - **Resumo do dia, 7 e 30 dias**: entregas, taxa de sucesso, km, tempo na rua, média por dia, gráfico de entregas por dia e problemas por motivo.
 - **Backup e restauração** de histórico, rota em andamento e fotos em um arquivo (para trocar de aparelho ou se o navegador apagar os dados), com lembrete semanal. A chave do ORS não entra no backup.
 - **PWA instalável** com funcionamento offline da interface.
@@ -46,5 +47,6 @@ Endereço resultante: `https://<usuario>.github.io/rota-express/`.
 ## Limitações conhecidas
 
 - O OCR baixa ~5 MB do próprio app na primeira vez (depois fica em cache). A qualidade depende da foto/scan: sempre confira os endereços lidos.
+- GPS em app web: no iPhone/iPad a localização só é atualizada com o app aberto na tela (o app mantém a tela ligada durante a rota). Ao voltar do Waze/Google Maps, o rastreamento continua de onde parou.
 - Sem chave ORS, a otimização usa distância em linha reta (não considera ruas/mão).
 - O plano gratuito do ORS tem limites diários e por requisição; se a otimização falhar, o app usa o modo local e mostra um aviso.

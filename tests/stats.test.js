@@ -55,6 +55,11 @@ describe('summarize', () => {
     expect(d9).toEqual({ date: '2026-10-09', delivered: 1, failed: 2, km: 35.5 });
   });
 
+  it('usa os km medidos pelo GPS quando existirem', () => {
+    const withGps = [{ ...routes[0], tracking: { meters: 23456 } }];
+    expect(summarize(withGps, 'today', now).km).toBeCloseTo(23.456);
+  });
+
   it('30 dias inclui a rota antiga; período vazio não divide por zero', () => {
     expect(summarize(routes, 'month', now).delivered).toBe(4);
     const empty = summarize([], 'week', now);
