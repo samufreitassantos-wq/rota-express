@@ -10,11 +10,13 @@ import { load, save, remove } from './lib/storage.js';
 import { orsDirections } from './lib/ors.js';
 import { haversine } from './lib/geo.js';
 import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from './lib/delivery.js';
-import { getPhoto, putPhoto, deletePhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
+import { getPhoto, putPhoto, deletePhotos, clearPhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
 import { stopWindow, hasWindows, simulate, fmtHHMM, nowMinutes, DEFAULTS as TIMING_DEFAULTS } from './lib/timeWindows.js';
 import { summarize } from './lib/stats.js';
 import { newTracking, ingestFix, observedSpeedKmh, observedServiceMin, isArrived, isFresh, distanceTo, fmtDistance, FAR_FROM_STOP_M } from './lib/tracking.js';
 import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from './lib/backup.js';
+import { cloudConfigured, cloud, photoPath } from './lib/cloud.js';
+import { syncOnce, newSyncMeta, pendingCount } from './lib/sync.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -52,9 +54,22 @@ function newRoute() {
   };
 }
 
-function persist() {
+/** Salva no aparelho sem marcar alteração (ex.: leituras do GPS, dados vindos da nuvem). */
+function saveLocal() {
   if (!save('current', route)) setStatus('#stops-status', 'Não foi possível salvar no aparelho (armazenamento cheio?).', 'error');
   $('#route-name').textContent = route.name;
+}
+
+/** Salva uma alteração da rota atual e agenda o envio para a nuvem (quando há conta). */
+function persist(syncDelayMs = 15000) {
+  if (route.stops.length) route.updatedAt = new Date().toISOString();
+  saveLocal();
+  scheduleSync(syncDelayMs);
+}
+
+function saveHistory() {
+  save('history', history);
+  scheduleSync(3000);
 }
 
 function setStatus(sel, msg, kind = '') {
@@ -73,7 +88,9 @@ function showTab(name) {
   if (name === 'stops') renderStops();
   if (name === 'route') renderRoute();
   if (name === 'history') renderHistory();
+  if (name === 'team') renderTeam(true);
   if (name === 'settings') {
+    renderAccount();
     $('#ors-key').value = settings.orsKey;
     $('#default-city').value = settings.defaultCity;
     $('#speed-kmh').value = settings.speedKmh ?? '';
@@ -497,7 +514,7 @@ async function loadThumbs() {
   thumbUrls = [];
   for (const img of document.querySelectorAll('#route-list img[data-photo]')) {
     try {
-      const blob = await getPhoto(img.dataset.photo);
+      const blob = await getPhotoAny(img.dataset.photo, route.ownerId);
       if (!blob) continue;
       const url = URL.createObjectURL(blob);
       thumbUrls.push(url);
@@ -610,7 +627,8 @@ $('#route-list').addEventListener('change', async (e) => {
       await putPhoto(s.id, await compressImage(file));
       requestPersistence();
       s.hasPhoto = true;
-      persist();
+      s.photoSynced = false;
+      persist(3000);
     } catch (err) {
       alert(`Não foi possível salvar a foto: ${err.message}`);
     }
@@ -691,8 +709,11 @@ function onFix(pos) {
     }
   }
   const now = Date.now();
-  if (arrivedNow.length || now - lastSave > 15000) {
-    persist();
+  if (arrivedNow.length) {
+    persist(3000); // chegada é uma alteração real: sobe logo
+    lastSave = now;
+  } else if (now - lastSave > 15000) {
+    saveLocal(); // leituras do GPS só ficam no aparelho até a próxima alteração
     lastSave = now;
   }
   if (arrivedNow.length) {
@@ -778,7 +799,7 @@ async function exportPdf(r, button) {
     const stops = orderedStops(r);
     const photos = {};
     for (const s of stops.filter((x) => x.hasPhoto)) {
-      const blob = await getPhoto(s.id).catch(() => null);
+      const blob = await getPhotoAny(s.id, r.ownerId).catch(() => null);
       if (blob) photos[s.id] = await blobToDataUrl(blob);
     }
     const { buildReportPdf } = await import('./lib/reportPdf.js');
@@ -797,8 +818,9 @@ function archive(r) {
   // Não guardamos o traçado completo no histórico para economizar espaço.
   const copy = structuredClone(r);
   if (copy.plan) copy.plan.geometry = [];
+  copy.updatedAt = new Date().toISOString();
   history = [copy, ...history.filter((h) => h.id !== r.id)].slice(0, HISTORY_MAX);
-  save('history', history);
+  saveHistory();
 }
 
 $('#btn-finish').addEventListener('click', () => {
@@ -918,7 +940,8 @@ $('#history-list').addEventListener('click', async (e) => {
   } else if (cls.contains('del')) {
     if (!confirm('Excluir esta rota do histórico (inclusive as fotos)?')) return;
     history = history.filter((x) => x.id !== h.id);
-    save('history', history);
+    queueCloudDelete(h);
+    saveHistory();
     await deletePhotos(h.stops.filter((s) => s.hasPhoto).map((s) => s.id)).catch(() => {});
     renderHistory();
   } else if (cls.contains('reuse')) {
@@ -969,7 +992,7 @@ async function makeBackup(button) {
   try {
     const photos = {};
     for (const id of photoIds(route, history)) {
-      const blob = await getPhoto(id).catch(() => null);
+      const blob = await getPhotoAny(id).catch(() => null);
       if (blob) photos[id] = await blobToDataUrl(blob);
     }
     const data = buildBackup({ settings, current: route, history, photos });
@@ -1037,6 +1060,7 @@ $('#restore-input').addEventListener('change', async (e) => {
 
 $('#btn-new-route').addEventListener('click', async () => {
   if (route.stops.length && !confirm('Descartar a rota atual (não finalizada)?')) return;
+  queueCloudDelete(route);
   await discardCurrentPhotos();
   stopGps({ silent: true });
   route = newRoute();
@@ -1046,12 +1070,408 @@ $('#btn-new-route').addEventListener('click', async () => {
   showTab('import');
 });
 
+// ---------- Conta, sincronização e equipe (somente com nuvem configurada) ----------
+let account = null; // { userId, email, profile }
+let syncMeta = load('syncMeta', newSyncMeta());
+let syncTimer = null;
+let syncing = null;
+let lastSyncAt = null;
+let syncError = '';
+
+/** Foto do aparelho; se não estiver aqui, busca na nuvem (outro aparelho/administrador) e guarda. */
+async function getPhotoAny(stopId, ownerId = account?.userId) {
+  const local = await getPhoto(stopId).catch(() => null);
+  if (local || !account || !ownerId) return local;
+  try {
+    const blob = await cloud.downloadPhoto(photoPath(ownerId, stopId));
+    if (blob) await putPhoto(stopId, blob).catch(() => {});
+    return blob;
+  } catch {
+    return null;
+  }
+}
+
+function queueCloudDelete(r) {
+  if (!account || !(r.id in syncMeta.synced)) return;
+  syncMeta.deleted.push({ id: r.id, photoIds: r.stops.filter((s) => s.hasPhoto).map((s) => s.id) });
+  save('syncMeta', syncMeta);
+}
+
+function scheduleSync(ms = 15000) {
+  if (!account) return;
+  renderSyncBadge();
+  const at = Date.now() + ms;
+  if (syncTimer && syncTimer.at <= at) return;
+  clearTimeout(syncTimer?.id);
+  syncTimer = { at, id: setTimeout(() => { syncTimer = null; syncNow(); }, ms) };
+}
+
+async function syncNow() {
+  if (!account) return;
+  if (syncing) return syncing;
+  syncing = (async () => {
+    renderSyncBadge(true);
+    try {
+      const res = await syncOnce({
+        adapter: cloud,
+        userId: account.userId,
+        state: { current: route, history },
+        meta: syncMeta,
+        getPhoto: (id) => getPhoto(id).catch(() => null),
+        historyMax: HISTORY_MAX,
+      });
+      syncMeta = res.meta;
+      save('syncMeta', syncMeta);
+      const changed = res.pulled || res.removed || res.photosUp;
+      history = res.state.history;
+      save('history', history);
+      if (res.state.current !== route) {
+        route = res.state.current;
+        route.stops.forEach(migrateStop);
+        fittedPlan = null;
+      }
+      if (route.finishedAt) {
+        // Rota finalizada em outro aparelho: aqui começa uma nova.
+        stopGps({ silent: true });
+        route = newRoute();
+      }
+      saveLocal();
+      lastSyncAt = new Date();
+      syncError = '';
+      if (changed) refreshVisibleTab();
+      if (res.adoptedCurrent) toast('Rota em andamento recuperada da sua conta.');
+    } catch (err) {
+      syncError = navigator.onLine ? err.message : 'sem internet';
+    } finally {
+      syncing = null;
+      renderSyncBadge();
+      if (!$('#view-settings').hidden) renderAccount();
+    }
+  })();
+  return syncing;
+}
+
+function refreshVisibleTab() {
+  const visible = document.querySelector('.view:not([hidden])')?.dataset.view;
+  // Não redesenha a aba de Paradas para não atrapalhar quem está digitando.
+  if (visible && visible !== 'stops' && visible !== 'import') showTab(visible);
+}
+
+function renderSyncBadge(inProgress = false) {
+  const el = $('#sync-badge');
+  if (!account) {
+    el.hidden = true;
+    return;
+  }
+  const pending = pendingCount({ current: route, history }, syncMeta);
+  el.hidden = false;
+  el.textContent = inProgress ? '☁️ ⟳' : syncError ? `☁️ ${pending || '!'}` : pending ? `☁️ ${pending}` : '☁️ ✓';
+  el.title = inProgress ? 'Sincronizando...' : syncError ? `Sem sincronizar (${syncError})` : pending ? `${pending} alteração(ões) a enviar` : 'Tudo sincronizado';
+  el.classList.toggle('warn', Boolean(syncError));
+}
+
+function renderAccount() {
+  const card = $('#account-card');
+  card.hidden = !account;
+  if (!account) return;
+  const role = account.profile.role === 'admin' ? 'Administrador' : 'Entregador';
+  $('#account-info').innerHTML = `Conectado como <b>${esc(account.email)}</b> · ${role}`;
+  const pending = pendingCount({ current: route, history }, syncMeta);
+  $('#sync-info').textContent = [
+    lastSyncAt ? `Última sincronização: ${lastSyncAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Ainda não sincronizado',
+    pending ? `${pending} alteração(ões) aguardando envio` : 'tudo enviado',
+    syncError && `erro: ${syncError}`,
+  ].filter(Boolean).join(' · ');
+}
+
+// ---- Tela de login ----
+function showAuth(step, msg = '', kind = '') {
+  $('#auth').hidden = false;
+  document.body.classList.add('locked');
+  for (const id of ['email', 'code', 'denied']) $(`#auth-step-${id}`).hidden = id !== step;
+  setStatus('#auth-status', msg, kind);
+  if (step === 'email') setTimeout(() => $('#auth-email').focus(), 50);
+  if (step === 'code') setTimeout(() => $('#auth-code').focus(), 50);
+}
+
+function hideAuth() {
+  $('#auth').hidden = true;
+  document.body.classList.remove('locked');
+}
+
+$('#auth-form-email').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('#auth-email').value.trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return setStatus('#auth-status', 'Digite um e-mail válido.', 'error');
+  const btn = $('#btn-send-code');
+  btn.disabled = true;
+  setStatus('#auth-status', 'Enviando código...');
+  try {
+    await cloud.sendCode(email);
+    $('#auth-email-shown').textContent = email;
+    showAuth('code', 'Código enviado. Confira também a caixa de spam.', 'ok');
+  } catch (err) {
+    setStatus('#auth-status', /rate|seconds/i.test(err.message) ? 'Aguarde um minuto antes de pedir outro código.' : `Não foi possível enviar: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('#auth-form-code').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = $('#auth-code').value.replace(/\D/g, '');
+  if (code.length < 6) return setStatus('#auth-status', 'Digite o código de 6 dígitos do e-mail.', 'error');
+  const btn = $('#btn-verify');
+  btn.disabled = true;
+  setStatus('#auth-status', 'Verificando...');
+  try {
+    const session = await cloud.verifyCode($('#auth-email-shown').textContent, code);
+    await enterAccount(session);
+  } catch (err) {
+    setStatus('#auth-status', /expired|invalid/i.test(err.message) ? 'Código inválido ou expirado. Peça um novo.' : `Não foi possível entrar: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('#btn-auth-back').addEventListener('click', () => {
+  $('#auth-code').value = '';
+  showAuth('email');
+});
+$('#btn-denied-retry').addEventListener('click', async () => {
+  const session = await cloud.session().catch(() => null);
+  if (session) await enterAccount(session);
+  else showAuth('email');
+});
+$('#btn-denied-logout').addEventListener('click', () => logout({ force: true }));
+
+/** Depois do login: confere o acesso, separa os dados do aparelho por pessoa e sincroniza. */
+async function enterAccount(session) {
+  const userId = session.user.id;
+  const email = session.user.email;
+  let profile;
+  try {
+    profile = await cloud.claimAccess();
+    if (profile) save('profile', profile);
+  } catch {
+    const cached = load('profile', null); // sem internet: usa o último acesso conhecido
+    profile = cached?.id === userId ? cached : null;
+    if (!profile) return showAuth('denied', 'Sem internet para confirmar seu acesso. Conecte-se e toque em "Tentar de novo".', 'error');
+  }
+  if (!profile) {
+    $('#auth-denied-email').textContent = email;
+    return showAuth('denied');
+  }
+
+  const owner = load('owner', null);
+  if (owner && owner !== userId) {
+    // Dados de outra pessoa ficaram neste aparelho: não podem aparecer para esta conta.
+    await clearLocalData();
+  } else if (!owner && (history.length || route.stops.length)) {
+    toast('As rotas que já estavam neste aparelho serão guardadas na sua conta.');
+  }
+  save('owner', userId);
+  account = { userId, email, profile };
+  route.ownerId = undefined;
+  hideAuth();
+  $('[data-tab=team]').hidden = profile.role !== 'admin';
+  renderSyncBadge();
+  await syncNow();
+  showTab(document.querySelector('.view:not([hidden])')?.dataset.view ?? (route.plan ? 'route' : 'import'));
+}
+
+async function clearLocalData() {
+  stopGps({ silent: true });
+  for (const k of ['current', 'history', 'syncMeta', 'profile']) remove(k);
+  await clearPhotos().catch(() => {});
+  route = newRoute();
+  history = [];
+  syncMeta = newSyncMeta();
+  fittedPlan = null;
+  saveLocal();
+}
+
+async function logout({ force = false } = {}) {
+  if (account && !force) {
+    await syncNow();
+    const pending = pendingCount({ current: route, history }, syncMeta);
+    if (pending && !confirm(`Há ${pending} alteração(ões) que ainda não foram enviadas (sem internet?). Se sair agora, elas serão perdidas neste aparelho. Sair mesmo assim?`)) return;
+    if (!pending && !confirm('Sair da conta? Os dados ficam guardados na nuvem e voltam quando você entrar de novo.')) return;
+  }
+  await cloud.signOut().catch(() => {});
+  // Só apaga dados que pertencem a uma conta. Rotas de antes do primeiro login (sem dono)
+  // ficam no aparelho até alguém com acesso entrar — evita perder dados por um e-mail digitado errado.
+  if (load('owner', null)) await clearLocalData();
+  remove('owner');
+  location.reload();
+}
+
+$('#btn-logout').addEventListener('click', () => logout());
+$('#btn-sync').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  await syncNow();
+  e.target.disabled = false;
+});
+$('#sync-badge').addEventListener('click', () => showTab('settings'));
+window.addEventListener('online', () => scheduleSync(1000));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') scheduleSync(2000);
+});
+setInterval(() => scheduleSync(0), 120000);
+
+// ---- Equipe (administrador) ----
+let team = { profiles: [], allowed: [], routes: [], loadedAt: 0, person: null, period: 'today' };
+
+async function loadTeam() {
+  const [profiles, allowed, rows] = await Promise.all([cloud.listProfiles(), cloud.listAllowed(), cloud.fetchTeamRoutes(30)]);
+  const routes = rows.map((row) => ({ ...row.data, ownerId: row.user_id, updatedAt: row.updated_at }));
+  routes.forEach((r) => r.stops.forEach(migrateStop));
+  team = { ...team, profiles, allowed, routes, loadedAt: Date.now() };
+}
+
+async function renderTeam(reload = false) {
+  if (account?.profile.role !== 'admin') return;
+  const body = $('#team-body');
+  if (reload || !team.loadedAt) {
+    body.innerHTML = '<p class="muted">Carregando dados da equipe...</p>';
+    try {
+      await loadTeam();
+    } catch (err) {
+      body.innerHTML = `<p class="status error">Não foi possível carregar (${esc(err.message)}). Verifique a internet e toque em Atualizar.</p>`;
+      return;
+    }
+  }
+  document.querySelectorAll('#view-team [data-period]').forEach((b) => b.classList.toggle('active', b.dataset.period === team.period));
+  $('#team-updated').textContent = `Atualizado às ${new Date(team.loadedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  if (team.person) return renderPerson(team.person);
+
+  const byUser = (id) => team.routes.filter((r) => r.ownerId === id);
+  const rows = team.profiles.map((p) => {
+    const routes = byUser(p.id);
+    const s = summarize(routes, team.period);
+    const live = routes.find((r) => !r.finishedAt && r.stops.length);
+    const last = routes[0]?.updatedAt;
+    return { p, s, live, last };
+  });
+  const total = summarize(team.routes, team.period);
+  const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+  body.innerHTML = `
+    <div class="tiles">
+      <div class="tile"><span class="v">${total.delivered}</span><span class="k">Entregas da equipe</span></div>
+      <div class="tile"><span class="v">${pct(total.successRate)}</span><span class="k">Sucesso</span></div>
+      <div class="tile"><span class="v">${fmtNum(total.km)} km</span><span class="k">Distância</span></div>
+    </div>
+    <div class="table-wrap"><table class="team">
+      <thead><tr><th>Pessoa</th><th>Entregas</th><th>Sucesso</th><th>Km</th><th>Agora</th></tr></thead>
+      <tbody>${rows.map(({ p, s, live, last }) => {
+        const st = live && routeStats(orderedStops(live));
+        return `<tr data-person="${p.id}" class="${p.active ? '' : 'inactive'}">
+          <td><b>${esc(p.name || p.email)}</b>${p.name ? `<br><span class="small muted">${esc(p.email)}</span>` : ''}${p.role === 'admin' ? ' <span class="tag-role">admin</span>' : ''}${p.active ? '' : ' <span class="small fail-text">sem acesso</span>'}</td>
+          <td>${s.delivered}${s.failed ? ` <span class="small fail-text">+${s.failed}✗</span>` : ''}</td>
+          <td>${pct(s.successRate)}</td>
+          <td>${fmtNum(s.km)}</td>
+          <td class="small">${live ? `Em rota: ${st.delivered + st.failed}/${st.total}` : last ? `Atualizou ${new Date(last).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}` : '—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <p class="small muted">Toque em uma pessoa para ver as rotas, exportar CSV ou PDF.</p>
+    <h3 class="chart-title">Acesso ao app</h3>
+    <form id="allow-form" class="row">
+      <input id="allow-email" type="email" placeholder="email@exemplo.com" required />
+      <select id="allow-role"><option value="driver">Entregador</option><option value="admin">Administrador</option></select>
+      <button class="primary">Liberar acesso</button>
+    </form>
+    <p id="allow-status" class="status"></p>
+    <ul class="reasons">${team.allowed.map((a) => {
+      const p = team.profiles.find((x) => x.email === a.email);
+      return `<li><span>${esc(a.email)} · ${a.role === 'admin' ? 'Administrador' : 'Entregador'}${p ? '' : ' · <span class="muted">ainda não entrou</span>'}</span>
+        ${a.email === account.email ? '<span class="muted small">você</span>' : `<button class="revoke danger" data-email="${esc(a.email)}">Remover</button>`}</li>`;
+    }).join('')}</ul>`;
+}
+
+function renderPerson(personId) {
+  const p = team.profiles.find((x) => x.id === personId);
+  const routes = team.routes.filter((r) => r.ownerId === personId);
+  const s = summarize(routes, team.period);
+  $('#team-body').innerHTML = `
+    <button id="team-back">← Equipe</button>
+    <h3>${esc(p?.name || p?.email || 'Pessoa')}</h3>
+    <div class="tiles">
+      <div class="tile"><span class="v">${s.delivered}</span><span class="k">Entregas</span></div>
+      <div class="tile"><span class="v">${s.successRate == null ? '—' : `${Math.round(s.successRate * 100)}%`}</span><span class="k">Sucesso</span></div>
+      <div class="tile"><span class="v">${fmtNum(s.km)} km</span><span class="k">Distância</span></div>
+    </div>
+    <ul class="list">${routes.map((r) => {
+      const st = routeStats(r.plan ? orderedStops(r) : r.stops);
+      return `<li class="card" data-route="${r.id}">
+        <div><b>${esc(r.name)}</b> ${r.finishedAt ? '' : '<span class="tag-role">em andamento</span>'}</div>
+        <div class="small muted">${st.delivered}/${st.total} entregues${st.failed ? ` · ${st.failed} com problema` : ''} · atualizada ${new Date(r.updatedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</div>
+        <div class="row"><button class="t-csv">Exportar CSV</button><button class="t-pdf">Relatório PDF</button><button class="t-stops">Ver paradas</button></div>
+        <ol class="t-stop-list" hidden>${(r.plan ? orderedStops(r) : r.stops).map((x) => `<li>${esc(x.address)} — ${OUTCOME_LABEL[x.outcome] ?? 'Pendente'}${x.outcomeAt ? ` às ${fmtHour(x.outcomeAt)}` : ''}${x.outcome === 'failed' && x.failReason ? ` (${esc(x.failReason)})` : ''}${x.outcomeDistM > FAR_FROM_STOP_M ? ` · <span class="warn">📍 a ${fmtDistance(x.outcomeDistM)}</span>` : ''}</li>`).join('')}</ol>
+      </li>`;
+    }).join('') || '<li class="muted">Nenhuma rota nos últimos 30 dias.</li>'}</ul>`;
+}
+
+$('#view-team').addEventListener('click', async (e) => {
+  const t = e.target;
+  if (t.closest('[data-period]')) {
+    team.period = t.closest('[data-period]').dataset.period;
+    return renderTeam();
+  }
+  if (t.id === 'btn-team-refresh') return renderTeam(true);
+  if (t.id === 'team-back') {
+    team.person = null;
+    return renderTeam();
+  }
+  const personRow = t.closest('[data-person]');
+  if (personRow) {
+    team.person = personRow.dataset.person;
+    return renderTeam();
+  }
+  if (t.classList.contains('revoke')) {
+    if (!confirm(`Remover o acesso de ${t.dataset.email}? As rotas dessa pessoa continuam guardadas.`)) return;
+    try {
+      await cloud.revokeEmail(t.dataset.email);
+      await renderTeam(true);
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+  const card = t.closest('[data-route]');
+  if (!card) return;
+  const r = team.routes.find((x) => x.id === card.dataset.route);
+  if (t.classList.contains('t-csv')) exportCsv(r);
+  if (t.classList.contains('t-pdf')) exportPdf(r, t);
+  if (t.classList.contains('t-stops')) card.querySelector('.t-stop-list').hidden ^= true;
+});
+
+$('#view-team').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'allow-form') return;
+  e.preventDefault();
+  const email = $('#allow-email').value.trim().toLowerCase();
+  try {
+    await cloud.allowEmail(email, $('#allow-role').value);
+    await renderTeam(true);
+    setStatus('#allow-status', `${email} liberado. A pessoa já pode entrar com esse e-mail.`, 'ok');
+  } catch (err) {
+    setStatus('#allow-status', err.message, 'error');
+  }
+});
+
 // ---------- PWA ----------
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
 }
 
-persist();
+saveLocal();
 showTab(route.plan ? 'route' : route.stops.length ? 'stops' : 'import');
 // Rota com GPS ligado quando o app foi fechado: retoma (a permissão já foi dada).
 if (route.tracking?.active) startGps({ resume: true });
+
+// Com nuvem configurada, é preciso entrar na conta (a sessão fica salva no aparelho).
+if (cloudConfigured) {
+  cloud.session()
+    .then((session) => (session ? enterAccount(session) : showAuth('email')))
+    .catch(() => showAuth('email', 'Não foi possível verificar a sessão. Confira a internet.', 'error'));
+}

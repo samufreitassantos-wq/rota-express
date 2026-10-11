@@ -22,6 +22,11 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - `src/lib/stats.js` — resumo por período (hoje/7/30 dias): entregas, sucesso, km, tempo na rua, motivos (puro, testado)
 - `src/lib/backup.js` — backup/restauração em JSON (sem a chave ORS; fotos como data URL; versão do formato em BACKUP_VERSION)
 - `src/lib/photos.js` — fotos de comprovante no IndexedDB (chave = id da parada)
+- `src/lib/cloud.js` — adaptador Supabase (login por código OTP, rotas, fotos, funções de admin); só ativo com VITE_SUPABASE_URL/ANON_KEY no build
+- `src/lib/sync.js` — sincronização aparelho↔nuvem (vence o updatedAt mais recente; compara instantes, não texto) (puro, testado)
+- `supabase/schema.sql` — tabelas + RLS (testado em `tests/rls.test.js` com PGlite); `supabase/admin.sql` — 1º admin
+- `scripts/mock-supabase.mjs` — imita a API do Supabase sobre PGlite com o schema real, para testar o app com login sem internet (`npm run mock:supabase`; build com VITE_SUPABASE_URL=http://localhost:54321)
+- `docs/CONFIGURAR-NUVEM.md` — passo a passo do usuário (tablet)
 - `src/main.js` — UI (abas: Importar, Paradas, Rota, Histórico, Ajustes)
 - `public/sw.js`, `public/manifest.webmanifest` — PWA
 
@@ -30,4 +35,6 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - Nenhum serviço pago obrigatório: o app precisa funcionar sem chave (Nominatim + otimização local).
 - A rede deste contêiner bloqueia ORS/Nominatim/tiles: testes usam fetch simulado. Não afirmar que a integração real foi testada sem evidência.
 - Interface e textos em português do Brasil; alvos de toque ≥ 44px.
+- Nuvem: nunca usar a chave service_role/secret no app; regras de acesso sempre no banco (RLS). Mudou o schema? Mantenha-o idempotente e atualize `tests/rls.test.js`.
+- `[hidden]` tem `display:none !important` no CSS — não remova (vários componentes usam display próprio).
 - Mudou o formato dos dados salvos? Escreva uma migração (ver `migrateStop`) — o usuário já tem rotas no aparelho.

@@ -25,6 +25,12 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          # Opcional: com estas variáveis (Settings › Secrets and variables › Actions › Variables),
+          # o app exige login e sincroniza com o Supabase. Sem elas, funciona só no aparelho.
+          # A chave anon/publishable é pública por natureza; NUNCA use a service_role/secret.
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

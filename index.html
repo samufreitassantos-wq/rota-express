@@ -14,7 +14,39 @@
     <header class="topbar">
       <h1>Rota Express</h1>
       <span id="route-name" class="muted"></span>
+      <button id="sync-badge" class="sync-badge" hidden></button>
     </header>
+
+    <div id="auth" class="auth" hidden>
+      <div class="auth-card">
+        <h1>Rota Express</h1>
+        <div id="auth-step-email">
+          <form id="auth-form-email">
+            <label for="auth-email">Seu e-mail</label>
+            <input id="auth-email" type="email" inputmode="email" autocomplete="email" placeholder="voce@exemplo.com" required />
+            <button id="btn-send-code" class="primary wide">Receber código por e-mail</button>
+          </form>
+          <p class="muted small">Você recebe um código de 6 dígitos para entrar. Só e-mails liberados pelo administrador têm acesso.</p>
+        </div>
+        <div id="auth-step-code" hidden>
+          <form id="auth-form-code">
+            <p>Digite o código enviado para <b id="auth-email-shown"></b>:</p>
+            <input id="auth-code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="000000" required />
+            <button id="btn-verify" class="primary wide">Entrar</button>
+          </form>
+          <button id="btn-auth-back" class="wide">Usar outro e-mail</button>
+        </div>
+        <div id="auth-step-denied" hidden>
+          <p>O e-mail <b id="auth-denied-email"></b> ainda não tem acesso ao app.</p>
+          <p class="muted small">Peça ao administrador para liberar este e-mail (aba Equipe) e toque em "Tentar de novo".</p>
+          <div class="row">
+            <button id="btn-denied-retry" class="primary">Tentar de novo</button>
+            <button id="btn-denied-logout">Entrar com outro e-mail</button>
+          </div>
+        </div>
+        <p id="auth-status" class="status"></p>
+      </div>
+    </div>
 
     <main>
       <section id="view-import" class="view" data-view="import">
@@ -85,6 +117,22 @@
         <ul id="history-list" class="list"></ul>
       </section>
 
+      <section id="view-team" class="view" data-view="team" hidden>
+        <div class="summary-head">
+          <h2>Equipe</h2>
+          <div class="segmented" role="group" aria-label="Período">
+            <button data-period="today">Hoje</button>
+            <button data-period="week">7 dias</button>
+            <button data-period="month">30 dias</button>
+          </div>
+        </div>
+        <div class="row">
+          <button id="btn-team-refresh">↻ Atualizar</button>
+          <span id="team-updated" class="small muted"></span>
+        </div>
+        <div id="team-body"></div>
+      </section>
+
       <section id="view-settings" class="view" data-view="settings" hidden>
         <h2>Ajustes</h2>
         <div class="card">
@@ -110,6 +158,15 @@
             <button id="btn-clear-cache">Limpar cache de endereços</button>
           </div>
           <p id="settings-status" class="status"></p>
+        </div>
+        <div id="account-card" class="card" hidden>
+          <label>Conta</label>
+          <p id="account-info"></p>
+          <p id="sync-info" class="small muted"></p>
+          <div class="row">
+            <button id="btn-sync">Sincronizar agora</button>
+            <button id="btn-logout" class="danger">Sair da conta</button>
+          </div>
         </div>
         <div class="card">
           <label>Backup</label>
@@ -140,6 +197,7 @@
       <button data-tab="stops">📋<span>Paradas</span></button>
       <button data-tab="route">🗺️<span>Rota</span></button>
       <button data-tab="history">🕘<span>Histórico</span></button>
+      <button data-tab="team" hidden>👥<span>Equipe</span></button>
       <button data-tab="settings">⚙️<span>Ajustes</span></button>
     </nav>
 
