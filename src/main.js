@@ -9,7 +9,7 @@ import { googleMapsUrl, googleMapsMultiUrl, wazeUrl, MOBILE_MAX_WAYPOINTS } from
 import { load, save, remove } from './lib/storage.js';
 import { orsDirections } from './lib/ors.js';
 import { haversine } from './lib/geo.js';
-import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, csvFileName } from './lib/delivery.js';
+import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from './lib/delivery.js';
 import { getPhoto, putPhoto, deletePhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -361,7 +361,7 @@ function renderRoute() {
       ${multi && !reorderMode ? `<a class="btn primary" href="${multi}" target="_blank" rel="noopener">Google Maps: próximas ${Math.min(pendingStops.length, MOBILE_MAX_WAYPOINTS + 1)}</a>` : ''}
       <button id="btn-reorder" class="${reorderMode ? 'accent' : ''}">${reorderMode ? 'Concluir reordenação' : '↕ Reordenar'}</button>
       ${!p.roadGeometry && settings.orsKey && !reorderMode ? '<button id="btn-redraw">Recalcular traçado</button>' : ''}
-      ${reorderMode ? '' : '<button id="btn-export-csv">Exportar CSV</button><button id="btn-report">Relatório (PDF)</button>'}
+      ${reorderMode ? '' : '<button id="btn-export-csv">Exportar CSV</button><button id="btn-report">Relatório PDF</button>'}
     </div>`;
 
   const openIds = new Set([...document.querySelectorAll('#route-list details[open]')].map((d) => d.closest('li').dataset.id));
@@ -425,7 +425,7 @@ $('#route-summary').addEventListener('click', async (e) => {
   } else if (id === 'btn-export-csv') {
     exportCsv(route);
   } else if (id === 'btn-report') {
-    printReport(route);
+    exportPdf(route, e.target);
   } else if (id === 'btn-redraw') {
     e.target.disabled = true;
     e.target.textContent = 'Calculando...';
@@ -502,53 +502,50 @@ $('#route-list').addEventListener('change', async (e) => {
 });
 
 // ---------- Exportação ----------
-async function exportCsv(r) {
-  const name = csvFileName(r);
-  const file = new File([toCsv(r, orderedStops(r))], name, { type: 'text/csv' });
-  // No tablet/celular, o menu de compartilhar permite salvar em Arquivos, WhatsApp, e-mail etc.
+/** No tablet/celular abre o menu de compartilhar (Arquivos, WhatsApp, e-mail...); senão baixa o arquivo. */
+async function shareOrDownload(file) {
   if (navigator.canShare?.({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: name });
+      await navigator.share({ files: [file], title: file.name });
       return;
     } catch (err) {
       if (err.name === 'AbortError') return;
     }
   }
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: name });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(file), download: file.name });
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
-async function printReport(r) {
-  const stops = orderedStops(r);
-  const st = routeStats(stops);
-  const photos = {};
-  for (const s of stops.filter((x) => x.hasPhoto)) {
-    try {
-      const blob = await getPhoto(s.id);
-      if (blob) photos[s.id] = await blobToDataUrl(blob);
-    } catch { /* sem foto */ }
+function exportCsv(r) {
+  return shareOrDownload(new File([toCsv(r, orderedStops(r))], routeFileName(r, 'csv'), { type: 'text/csv' }));
+}
+
+async function exportPdf(r, button) {
+  const label = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Gerando PDF...';
   }
-  const report = $('#print-report');
-  report.innerHTML = `
-    <h1>${esc(r.name)}</h1>
-    <p>${st.delivered} entregues · ${st.failed} com problema · ${st.pending} pendentes · ${r.plan ? fmtKm(r.plan.distance) : ''}
-    ${r.finishedAt ? ` · finalizada em ${new Date(r.finishedAt).toLocaleString('pt-BR')}` : ''}</p>
-    <table>
-      <thead><tr><th>#</th><th>Endereço</th><th>Situação</th><th>Horário</th><th>Observação</th></tr></thead>
-      <tbody>${stops.map((s, i) => `<tr>
-        <td>${i + 1}</td>
-        <td>${esc(s.address)}</td>
-        <td>${OUTCOME_LABEL[s.outcome] ?? 'Pendente'}${s.outcome === 'failed' ? `<br><small>${esc(s.failReason ?? '')}</small>` : ''}</td>
-        <td>${s.outcomeAt ? new Date(s.outcomeAt).toLocaleString('pt-BR') : ''}</td>
-        <td>${esc(s.note ?? '')}${photos[s.id] ? `<br><img src="${photos[s.id]}" alt="">` : ''}</td>
-      </tr>`).join('')}</tbody>
-    </table>
-    <p class="small">Gerado pelo Rota Express em ${new Date().toLocaleString('pt-BR')}</p>`;
-  await Promise.all([...report.querySelectorAll('img')].map((img) => img.decode().catch(() => {})));
-  window.print();
+  try {
+    const stops = orderedStops(r);
+    const photos = {};
+    for (const s of stops.filter((x) => x.hasPhoto)) {
+      const blob = await getPhoto(s.id).catch(() => null);
+      if (blob) photos[s.id] = await blobToDataUrl(blob);
+    }
+    const { buildReportPdf } = await import('./lib/reportPdf.js');
+    await shareOrDownload(new File([buildReportPdf(r, stops, photos)], routeFileName(r, 'pdf'), { type: 'application/pdf' }));
+  } catch (err) {
+    alert(`Não foi possível gerar o PDF: ${err.message}`);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
 }
 
 function archive(r) {
@@ -579,7 +576,7 @@ function renderHistory() {
       <div class="muted small">${st.delivered}/${st.total} entregues${st.failed ? ` · ${st.failed} com problema` : ''} · ${h.plan ? fmtKm(h.plan.distance) : '—'} · finalizada ${h.finishedAt ? new Date(h.finishedAt).toLocaleString('pt-BR') : '—'}</div>
       <div class="row">
         <button class="csv">Exportar CSV</button>
-        <button class="report">Relatório (PDF)</button>
+        <button class="report">Relatório PDF</button>
         <button class="reuse">Reusar endereços</button>
         <button class="del danger">Excluir</button>
       </div>
@@ -595,7 +592,7 @@ $('#history-list').addEventListener('click', async (e) => {
   if (cls.contains('csv')) {
     exportCsv(h);
   } else if (cls.contains('report')) {
-    printReport(h);
+    exportPdf(h, e.target);
   } else if (cls.contains('del')) {
     if (!confirm('Excluir esta rota do histórico (inclusive as fotos)?')) return;
     history = history.filter((x) => x.id !== h.id);

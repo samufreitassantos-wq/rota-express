@@ -75,15 +75,3 @@ button:active, .btn:active { transform: scale(.98); }
 .extra textarea { font-family: inherit; font-size: .95rem; }
 .thumb { display: block; max-width: 100%; max-height: 220px; margin-top: 8px; border-radius: 8px; }
 #route-summary .actions .btn, #route-summary .actions button { font-size: .9rem; }
-
-#print-report { display: none; }
-@media print {
-  body { background: #fff; color: #000; }
-  body > :not(#print-report) { display: none !important; }
-  #print-report { display: block; font: 11pt/1.35 system-ui, sans-serif; }
-  #print-report h1 { font-size: 16pt; margin: 0 0 4pt; }
-  #print-report table { width: 100%; border-collapse: collapse; }
-  #print-report th, #print-report td { border: 1px solid #999; padding: 4pt; text-align: left; vertical-align: top; }
-  #print-report tr { break-inside: avoid; }
-  #print-report img { max-width: 160pt; max-height: 120pt; margin-top: 4pt; }
-}

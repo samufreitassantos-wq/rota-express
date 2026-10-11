@@ -67,8 +67,8 @@ export function toCsv(route, stops) {
   return '﻿' + [header, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n') + '\r\n';
 }
 
-export function csvFileName(route) {
+export function routeFileName(route, ext) {
   const d = new Date(route.finishedAt ?? route.createdAt);
   const pad = (n) => String(n).padStart(2, '0');
-  return `rota-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.csv`;
+  return `rota-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.${ext}`;
 }
