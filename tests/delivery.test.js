@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { migrateStop, routeStats, moveTo, moveBy, toCsv, csvFileName } from '../src/lib/delivery.js';
+import { migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from '../src/lib/delivery.js';
 import { googleMapsMultiUrl } from '../src/lib/navLinks.js';
 
 describe('migrateStop', () => {
@@ -51,7 +51,8 @@ describe('toCsv', () => {
     expect(lines[3]).toBe('3;Rua C, 3;Pendente;;;;;;');
   });
   it('nomeia o arquivo pela data', () => {
-    expect(csvFileName({ createdAt: '2026-10-11T10:05:00' })).toBe('rota-2026-10-11-1005.csv');
+    expect(routeFileName({ createdAt: '2026-10-11T10:05:00' }, 'csv')).toBe('rota-2026-10-11-1005.csv');
+    expect(routeFileName({ createdAt: '2026-10-11T10:05:00', finishedAt: '2026-10-11T18:30:00' }, 'pdf')).toBe('rota-2026-10-11-1830.pdf');
   });
 });
 
