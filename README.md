@@ -10,11 +10,13 @@ Aplicativo web (PWA) de roteirização de entregas, pensado para celular e table
 - **Otimização de rota** (30–60 paradas): OpenRouteService (VROOM) quando há chave; caso contrário ou em caso de falha, heurística local (vizinho mais próximo + 2-opt) em distância de linha reta.
 - **Mapa interativo** (Leaflet + OpenStreetMap) com pinos numerados; arraste um pino para corrigir a posição.
 - **Botões Google Maps e Waze** para navegar até cada parada.
-- **Registro de entregas** com horário, barra de progresso e destaque da próxima parada.
-- **Histórico** de rotas finalizadas (reusar endereços / excluir).
+- **Registro de entregas**: "Entregue" ou "Problema" (com motivo: ausente, recusado, local fechado...), horário, observação e **foto de comprovante** (comprimida e guardada no aparelho).
+- **Reordenar paradas** manualmente (▲▼ ou "Fazer a seguir").
+- **Google Maps com as próximas 4 paradas** em um único link.
+- **Histórico** de rotas finalizadas: exportar **CSV** (abre no Excel) e **relatório para imprimir/salvar em PDF**, reusar endereços, excluir.
 - **PWA instalável** com funcionamento offline da interface.
 
-Tudo fica salvo no `localStorage` do aparelho. Não há servidor próprio.
+Tudo fica salvo no aparelho (`localStorage`; fotos no IndexedDB). Não há servidor próprio.
 
 ## Chave do OpenRouteService (opcional, gratuita)
 
