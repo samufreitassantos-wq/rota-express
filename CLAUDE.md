@@ -13,7 +13,10 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - `src/lib/ors.js` — cliente OpenRouteService (geocode, optimization, directions)
 - `src/lib/geocode.js` — ORS se houver chave, senão Nominatim; cache no localStorage
 - `src/lib/planner.js` — ORS com fallback para otimização local
-- `src/lib/pdf.js` — texto de PDF via pdf.js (sem OCR)
+- `src/lib/pdf.js` — texto de PDF via pdf.js (build **legacy**, necessária no Safari/iPad); páginas sem texto vão para OCR
+- `src/lib/ocr.js` — Tesseract.js com arquivos em `public/ocr/` (gerados por `scripts/copy-ocr-assets.mjs` no predev/prebuild; não versionados)
+- `src/lib/delivery.js` — situação da entrega (outcome: delivered/failed), reordenação, CSV (puro, testado)
+- `src/lib/photos.js` — fotos de comprovante no IndexedDB (chave = id da parada)
 - `src/main.js` — UI (abas: Importar, Paradas, Rota, Histórico, Ajustes)
 - `public/sw.js`, `public/manifest.webmanifest` — PWA
 
@@ -22,3 +25,4 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - Nenhum serviço pago obrigatório: o app precisa funcionar sem chave (Nominatim + otimização local).
 - A rede deste contêiner bloqueia ORS/Nominatim/tiles: testes usam fetch simulado. Não afirmar que a integração real foi testada sem evidência.
 - Interface e textos em português do Brasil; alvos de toque ≥ 44px.
+- Mudou o formato dos dados salvos? Escreva uma migração (ver `migrateStop`) — o usuário já tem rotas no aparelho.
