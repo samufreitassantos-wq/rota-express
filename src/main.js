@@ -11,6 +11,7 @@ import { orsDirections } from './lib/ors.js';
 import { haversine } from './lib/geo.js';
 import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from './lib/delivery.js';
 import { getPhoto, putPhoto, deletePhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
+import { stopWindow, hasWindows, simulate, fmtHHMM, nowMinutes, DEFAULTS as TIMING_DEFAULTS } from './lib/timeWindows.js';
 import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from './lib/backup.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -19,6 +20,10 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const HISTORY_MAX = 50;
 
 const settings = load('settings', { orsKey: '', defaultCity: '' });
+const timing = () => ({
+  speedKmh: Number(settings.speedKmh) || TIMING_DEFAULTS.speedKmh,
+  serviceMin: Number(settings.serviceMin ?? TIMING_DEFAULTS.serviceMin),
+});
 let route = load('current', null) ?? newRoute();
 let history = load('history', []);
 // Dados salvos pela versão anterior usavam delivered/deliveredAt.
@@ -62,6 +67,8 @@ function showTab(name) {
   if (name === 'settings') {
     $('#ors-key').value = settings.orsKey;
     $('#default-city').value = settings.defaultCity;
+    $('#speed-kmh').value = settings.speedKmh ?? '';
+    $('#service-min').value = settings.serviceMin ?? '';
     renderBackupInfo();
   }
 }
@@ -146,11 +153,42 @@ function renderStops() {
         ${s.label ? `<span class="muted small">${esc(s.label)}</span>` : ''}
       </div>
       <button class="del" title="Remover">🗑</button>
+      <details class="tw" ${stopWindow(s) ? 'open' : ''}>
+        <summary>⏰ ${windowLabel(s) ?? 'Horário livre'}</summary>
+        <div class="tw-row">
+          <label class="small">Das <input class="tw-start" type="time" value="${esc(s.windowStart ?? '')}" /></label>
+          <label class="small">até <input class="tw-end" type="time" value="${esc(s.windowEnd ?? '')}" /></label>
+          ${stopWindow(s) ? '<button class="tw-clear">Limpar</button>' : ''}
+        </div>
+      </details>
     </li>`).join('') || '<li class="muted">Nenhuma parada. Importe um PDF ou cole endereços.</li>';
 }
 
+function windowLabel(s) {
+  if (!stopWindow(s)) return null;
+  if (s.windowStart && s.windowEnd) return `${s.windowStart}–${s.windowEnd}`;
+  return s.windowStart ? `a partir das ${s.windowStart}` : `até ${s.windowEnd}`;
+}
+
+function windowChanged() {
+  // Rota já otimizada continua valendo; o aviso pede para otimizar de novo.
+  if (route.plan) route.plan.windowsChanged = true;
+  persist();
+  renderStops();
+  setStatus('#stops-status', 'Horário alterado. Toque em "Otimizar rota" para levar em conta.', 'warn');
+}
+
 $('#stops-list').addEventListener('change', (e) => {
-  if (!e.target.classList.contains('addr')) return;
+  const cls = e.target.classList;
+  if (cls.contains('tw-start') || cls.contains('tw-end')) {
+    const stop = findStop(e.target.closest('li').dataset.id);
+    stop[cls.contains('tw-start') ? 'windowStart' : 'windowEnd'] = e.target.value || undefined;
+    if (stop.windowStart && stop.windowEnd && stop.windowStart > stop.windowEnd) {
+      setStatus('#stops-status', 'O início do horário está depois do fim — confira.', 'error');
+    }
+    return windowChanged();
+  }
+  if (!cls.contains('addr')) return;
   const stop = route.stops.find((s) => s.id === e.target.closest('li').dataset.id);
   stop.address = normalizeAddress(e.target.value);
   Object.assign(stop, { status: 'pending', lat: undefined, lng: undefined, label: undefined });
@@ -159,6 +197,11 @@ $('#stops-list').addEventListener('change', (e) => {
   renderStops();
 });
 $('#stops-list').addEventListener('click', (e) => {
+  if (e.target.classList.contains('tw-clear')) {
+    const stop = findStop(e.target.closest('li').dataset.id);
+    stop.windowStart = stop.windowEnd = undefined;
+    return windowChanged();
+  }
   if (!e.target.classList.contains('del')) return;
   const id = e.target.closest('li').dataset.id;
   if (findStop(id)?.hasPhoto) deletePhotos([id]).catch(() => {});
@@ -244,7 +287,13 @@ $('#btn-optimize').addEventListener('click', async () => {
     if (located.length < 2) return setStatus('#stops-status', 'São necessárias ao menos 2 paradas localizadas.', 'error');
     const start = route.start?.lat != null ? route.start : located[0];
     setStatus('#stops-status', `Otimizando ${located.length} paradas...`);
-    const plan = await planRoute(start, located, { key: settings.orsKey });
+    const startMin = nowMinutes();
+    const plan = await planRoute(start, located, {
+      key: settings.orsKey,
+      windows: located.map(stopWindow),
+      startMin,
+      timing: timing(),
+    });
     route.plan = {
       order: plan.order.map((i) => located[i].id),
       geometry: plan.geometry,
@@ -287,13 +336,44 @@ const orderedStops = (r = route) => (r.plan?.order ?? []).map((id) => r.stops.fi
 const findStop = (id) => route.stops.find((s) => s.id === id);
 const fmtHour = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
+/**
+ * Previsão ao vivo: das paradas pendentes, a partir de agora e do último ponto concluído
+ * (ou da partida). Recalcula a cada atualização da tela, inclusive após reordenar.
+ */
+function liveSchedule(stops) {
+  const done = stops.filter((s) => s.outcome).sort((a, b) => Date.parse(a.outcomeAt) - Date.parse(b.outcomeAt));
+  const from = done.at(-1) ?? route.plan.start;
+  const pending = stops.filter((s) => !s.outcome);
+  if (!from || !pending.length) return { byId: {}, end: null, lateCount: 0 };
+  const sim = simulate([from, ...pending], [null, ...pending.map(stopWindow)], nowMinutes(), timing());
+  const byId = {};
+  pending.forEach((s, i) => (byId[s.id] = sim.stops[i]));
+  return { byId, end: sim.end, lateCount: sim.lateCount };
+}
+
+function etaLine(s, eta) {
+  const win = windowLabel(s);
+  if (!eta && !win) return '';
+  const parts = [];
+  if (eta) parts.push(`Previsão ~${fmtHHMM(eta.arrival)}`);
+  if (win) parts.push(`⏰ ${win}`);
+  let cls = 'muted';
+  if (eta?.late > 0) {
+    cls = 'fail-text';
+    parts.push(`⚠ atraso de ~${Math.round(eta.late)} min`);
+  } else if (eta?.wait >= 5) {
+    parts.push(`espera ~${Math.round(eta.wait)} min`);
+  }
+  return `<div class="small ${cls}">${parts.join(' · ')}</div>`;
+}
+
 function outcomeLine(s) {
   if (s.outcome === 'delivered') return `<div class="muted small">Entregue às ${fmtHour(s.outcomeAt)}</div>`;
   if (s.outcome === 'failed') return `<div class="small fail-text">Problema às ${fmtHour(s.outcomeAt)}</div>`;
   return '';
 }
 
-function stopItem(s, i, next, openIds) {
+function stopItem(s, i, next, openIds, eta) {
   const pending = !s.outcome;
   if (reorderMode) {
     return `<li data-id="${s.id}" class="rstop ${s.outcome ?? ''} ${s === next ? 'next' : ''}">
@@ -304,7 +384,7 @@ function stopItem(s, i, next, openIds) {
           <button class="mv-up" aria-label="Subir">▲</button>
           <button class="mv-down" aria-label="Descer">▼</button>
           ${s === next ? '' : '<button class="mv-next">Fazer a seguir</button>'}
-        </div>` : outcomeLine(s)}
+        </div>${etaLine(s, eta)}` : outcomeLine(s)}
       </div>
     </li>`;
   }
@@ -313,7 +393,7 @@ function stopItem(s, i, next, openIds) {
     <div class="num">${i + 1}</div>
     <div class="body">
       <div class="addr">${esc(s.address)}</div>
-      ${outcomeLine(s)}
+      ${s.outcome ? outcomeLine(s) : etaLine(s, eta)}
       <div class="actions">
         <a class="btn" href="${googleMapsUrl(s)}" target="_blank" rel="noopener">Google Maps</a>
         <a class="btn" href="${wazeUrl(s)}" target="_blank" rel="noopener">Waze</a>
@@ -350,6 +430,7 @@ function renderRoute() {
     return;
   }
   const st = routeStats(stops);
+  const sched = liveSchedule(stops);
   const pendingStops = stops.filter((s) => !s.outcome);
   const next = pendingStops[0];
   const p = route.plan;
@@ -357,6 +438,8 @@ function renderRoute() {
   $('#route-summary').innerHTML = `
     <div><b>${st.delivered}/${st.total}</b> entregues${st.failed ? ` · <span class="fail-text">${st.failed} com problema</span>` : ''} · ${fmtKm(p.distance)} · ${fmtDur(p.duration)}</div>
     <div class="progress"><span style="width:${(st.delivered / st.total) * 100}%"></span><span class="failed" style="width:${(st.failed / st.total) * 100}%"></span></div>
+    ${sched.end != null ? `<div>Término previsto ~<b>${fmtHHMM(sched.end)}</b>${sched.lateCount ? ` · <span class="fail-text">⚠ ${sched.lateCount} parada(s) com atraso previsto</span>` : ''}</div>` : ''}
+    ${p.windowsChanged ? '<div class="warn">Horários mudaram depois da otimização: em Paradas, toque em "Otimizar rota" de novo.</div>' : ''}
     <div class="muted">Otimização: ${p.method === 'ors' ? 'OpenRouteService' : 'local (linha reta)'}${p.manual ? ' · ordem ajustada manualmente' : ''}${p.roadGeometry ? '' : ' · traçado aproximado'}</div>
     ${(p.warnings ?? []).map((w) => `<div class="warn">${esc(w)}</div>`).join('')}
     <div class="actions">
@@ -367,7 +450,7 @@ function renderRoute() {
     </div>`;
 
   const openIds = new Set([...document.querySelectorAll('#route-list details[open]')].map((d) => d.closest('li').dataset.id));
-  $('#route-list').innerHTML = stops.map((s, i) => stopItem(s, i, next, openIds)).join('');
+  $('#route-list').innerHTML = stops.map((s, i) => stopItem(s, i, next, openIds, sched.byId[s.id])).join('');
   loadThumbs();
 
   if (p.start) L.circleMarker([p.start.lat, p.start.lng], { radius: 8, color: '#1d4ed8', fillOpacity: 0.9 }).bindTooltip('Partida').addTo(layer);
@@ -631,6 +714,12 @@ function discardCurrentPhotos() {
 $('#btn-save-settings').addEventListener('click', () => {
   settings.orsKey = $('#ors-key').value.trim();
   settings.defaultCity = $('#default-city').value.trim();
+  const num = (sel, min, max) => {
+    const v = $(sel).value.trim();
+    return v === '' ? undefined : Math.min(max, Math.max(min, Number(v)));
+  };
+  settings.speedKmh = num('#speed-kmh', 5, 120);
+  settings.serviceMin = num('#service-min', 0, 60);
   save('settings', settings);
   setStatus('#settings-status', 'Ajustes salvos neste aparelho.', 'ok');
 });

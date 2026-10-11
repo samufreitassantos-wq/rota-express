@@ -86,6 +86,15 @@
           <label for="default-city">Cidade padrão para busca</label>
           <input id="default-city" placeholder="Ex.: São Paulo - SP" />
           <div class="row">
+            <label class="grow">Velocidade média (km/h)
+              <input id="speed-kmh" type="number" inputmode="numeric" min="5" max="120" placeholder="25" />
+            </label>
+            <label class="grow">Tempo em cada parada (min)
+              <input id="service-min" type="number" inputmode="numeric" min="0" max="60" placeholder="3" />
+            </label>
+          </div>
+          <p class="muted small">Usados para prever horários de chegada e respeitar os horários de entrega.</p>
+          <div class="row">
             <button id="btn-save-settings" class="primary">Salvar</button>
             <button id="btn-clear-cache">Limpar cache de endereços</button>
           </div>

@@ -76,3 +76,10 @@ button:active, .btn:active { transform: scale(.98); }
 .thumb { display: block; max-width: 100%; max-height: 220px; margin-top: 8px; border-radius: 8px; }
 #route-summary .actions .btn, #route-summary .actions button { font-size: .9rem; }
 .warn-card { border-color: var(--warn); }
+.tw { grid-column: 1 / -1; }
+.tw summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; color: var(--muted); font-size: .9rem; }
+.tw[open] summary { color: var(--text); }
+.tw-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tw-row label { display: flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; }
+.tw-row input { width: auto; min-width: 120px; }
+label.grow { flex: 1 1 160px; font-weight: 600; }
