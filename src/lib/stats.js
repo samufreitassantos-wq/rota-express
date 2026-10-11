@@ -53,9 +53,11 @@ export function summarize(routes, period = 'week', now = new Date()) {
         reasons[why] = (reasons[why] ?? 0) + 1;
       }
     }
-    if (inPeriod.has(routeDay) && r.plan?.distance) {
-      km += r.plan.distance / 1000;
-      perDay[routeDay].km += r.plan.distance / 1000;
+    // Km rodados medidos pelo GPS têm prioridade sobre a distância planejada.
+    const routeKm = r.tracking?.meters > 500 ? r.tracking.meters / 1000 : (r.plan?.distance ?? 0) / 1000;
+    if (inPeriod.has(routeDay) && routeKm) {
+      km += routeKm;
+      perDay[routeDay].km += routeKm;
       counted = true;
     }
     if (counted) {

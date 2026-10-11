@@ -8,6 +8,12 @@ const stops = [
 ];
 
 describe('reportRows', () => {
+  it('mostra chegada pelo GPS e aviso de marcação longe do endereço', () => {
+    const [row] = reportRows([{ address: 'Rua D, 4', outcome: 'delivered', arrivedAt: '2026-10-11T13:00:00Z', outcomeAt: '2026-10-11T13:04:00Z', outcomeDistM: 1500, note: 'Portaria' }]);
+    expect(row[3]).toMatch(/^Chegou \d{2}:\d{2}\n/);
+    expect(row[4]).toBe('Portaria\nMarcado a 1,5 km do endereço');
+  });
+
   it('monta as colunas do relatório', () => {
     const rows = reportRows(stops);
     expect(rows[0].slice(0, 3)).toEqual(['1', 'Rua A, 1', 'Entregue']);
