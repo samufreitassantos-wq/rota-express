@@ -185,6 +185,17 @@ Legenda: **IV** implementado e verificado · **INT** implementado, não testado 
 continuam (seção 6) aceitos conscientemente. Para tratar o app como "produção segura" completa,
 faltam **backup da nuvem** e **MFA do administrador** (seção 7).
 
+## 8.1 Verificação em produção (12/10/2026, conector Supabase, somente leitura)
+
+- **Schema v2 aplicado:** RLS ligada nas 4 tabelas; checagens `routes_id_format`, `routes_data_size` e `routes_name_len`; os gatilhos `only_allowed_signup`, `routes_before_write`, `audit_*` e `profiles_guard`; `server_updated_at`; bucket `photos` privado, com 5 MB e só JPEG/PNG/WebP; `anon` sem execução de `is_admin`.
+- **Auditoria funcionando:** registrou a primeira exclusão real de rota, feita pelo próprio administrador.
+- **Sincronização funcionando:** gravações com resposta 200/201 nos registros da API.
+- **Security Advisor do Supabase:**
+  - `function_search_path_mutable` (`profiles_guard`): **corrigido** no schema;
+  - funções de **gatilho** executáveis por `anon`/`authenticated` via `/rpc`: **corrigido** (acesso fechado; os gatilhos continuam ativos, conforme os testes);
+  - `admin_*`, `claim_access`, `is_admin` e `is_member` executáveis por usuários logados: **aceito**, porque são a API do app e cada uma confere o papel internamente;
+  - "Leaked password protection": **não se aplica** (o app não usa senhas).
+
 ## 9. Manutenção
 
 - **Mensal:** `npm audit` (o CI roda os testes a cada mudança) e revisão do registro de atividades na aba Equipe.
