@@ -128,7 +128,7 @@ create policy "atualiza o próprio nome" on public.profiles for update to authen
 
 -- Impede que alguém mude o próprio papel/ativo/e-mail com um update direto.
 create or replace function public.profiles_guard() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 begin
   if current_user = 'authenticated' and (new.role is distinct from old.role or new.active is distinct from old.active or new.email is distinct from old.email) then
     raise exception 'Alteração não permitida';
@@ -265,3 +265,12 @@ create trigger only_allowed_signup before insert on auth.users for each row exec
 -- Fotos: até 5 MB, somente imagens comuns (o app envia JPEG comprimido de ~100–300 KB).
 update storage.buckets set file_size_limit = 5242880, allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp']
 where id = 'photos';
+
+-- Funções de gatilho não devem ser chamáveis pela API (/rest/v1/rpc). Os gatilhos continuam
+-- funcionando: a permissão de execução não é exigida quando a função roda como gatilho.
+-- (Apontado pelo Security Advisor do Supabase.)
+revoke all on function public.profiles_guard() from public, anon, authenticated;
+revoke all on function public.routes_before_write() from public, anon, authenticated;
+revoke all on function public.audit_allowed_emails() from public, anon, authenticated;
+revoke all on function public.audit_routes_delete() from public, anon, authenticated;
+revoke all on function public.only_allowed_signup() from public, anon, authenticated;

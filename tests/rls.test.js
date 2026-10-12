@@ -160,6 +160,28 @@ describe('reforços de segurança', () => {
     expect(anonFails).toBe(true);
   });
 
+  it('funções de gatilho não são executáveis pela API, mas os gatilhos seguem ativos', async () => {
+    const fns = ['profiles_guard', 'routes_before_write', 'audit_allowed_emails', 'audit_routes_delete', 'only_allowed_signup'];
+    for (const role of ['anon', 'authenticated']) {
+      const r = await db.query(`select bool_or(has_function_privilege('${role}', 'public.' || f || '()', 'execute')) as any from unnest($1::text[]) f`, [fns]);
+      expect(r.rows[0].any).toBe(false);
+    }
+    // Gatilhos ainda disparam com as permissões revogadas:
+    await as(ANA, `insert into routes (id, data) values ('apos_revoke', '{}')`);
+    const row = (await as(ANA, `select server_updated_at from routes where id = 'apos_revoke'`)).rows[0];
+    expect(row.server_updated_at).toBeTruthy();
+    await as(ANA, `delete from routes where id = 'apos_revoke'`);
+    expect((await as(ADMIN, `select 1 from audit_log where target = 'apos_revoke'`)).rows).toHaveLength(1);
+    expect(await fails(db.exec(`insert into auth.users values ('00000000-0000-0000-0000-0000000000ee', 'novo@ex.com')`))).toBe(true);
+    expect(await fails(as(ANA, `update profiles set role = 'admin' where id = '${ANA}'`))).toBe(true);
+  });
+
+  it('search_path fixo em todas as funções do esquema public', async () => {
+    const r = await db.query(`select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and not exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'search_path=%')`);
+    expect(r.rows.map((x) => x.proname)).toEqual([]);
+  });
+
   it('fotos: limite de tamanho e tipos no bucket', async () => {
     const b = (await db.query(`select file_size_limit, allowed_mime_types from storage.buckets where id = 'photos'`)).rows[0];
     expect(Number(b.file_size_limit)).toBe(5242880);
