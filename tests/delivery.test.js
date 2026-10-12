@@ -50,6 +50,17 @@ describe('toCsv', () => {
     expect(lines[2]).toBe('2;Rua B, 2;Problema;Cliente ausente;;;;;;;');
     expect(lines[3]).toBe('3;Rua C, 3;Pendente;;;;;;;;');
   });
+  it('neutraliza fórmulas (CSV injection) sem alterar números negativos', () => {
+    const csv = toCsv({ createdAt: '2026-10-11T10:00:00Z' }, [
+      { address: '=HYPERLINK("http://mal.example","Clique")', outcome: 'failed', failReason: '@SUM(1)', note: '+cmd', lat: -23.5, lng: -46.6 },
+    ]);
+    const line = csv.replace('\uFEFF', '').trim().split('\r\n')[1];
+    expect(line).toContain(`"'=HYPERLINK(""http://mal.example"",""Clique"")"`);
+    expect(line).toContain("'@SUM(1)");
+    expect(line).toContain("'+cmd");
+    expect(line).toContain(';-23.500000;-46.600000');
+  });
+
   it('nomeia o arquivo pela data', () => {
     expect(routeFileName({ createdAt: '2026-10-11T10:05:00' }, 'csv')).toBe('rota-2026-10-11-1005.csv');
     expect(routeFileName({ createdAt: '2026-10-11T10:05:00', finishedAt: '2026-10-11T18:30:00' }, 'pdf')).toBe('rota-2026-10-11-1830.pdf');

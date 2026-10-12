@@ -19,7 +19,7 @@ const STUB = `
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   create schema storage;
-  create table storage.buckets (id text primary key, name text, public boolean);
+  create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
   create table storage.objects (id serial primary key, bucket_id text, name text, unique (bucket_id, name));
   create function storage.foldername(name text) returns text[] language sql immutable as
     $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
@@ -141,7 +141,8 @@ async function rest(req, res, url, uid) {
       const cols = (params.get('select') ?? '*').split(',').map((c) => (c === '*' ? '*' : `"${c}"`)).join(',');
       const { where, values } = parseFilters(params);
       const order = params.get('order') ? `order by "${params.get('order').split('.')[0]}" ${params.get('order').includes('.desc') ? 'desc' : 'asc'}` : '';
-      const r = await asUser(uid, () => db.query(`select ${cols} from public.${name} ${where} ${order}`, values));
+      const limit = Number(params.get('limit')) > 0 ? `limit ${Number(params.get('limit'))}` : '';
+      const r = await asUser(uid, () => db.query(`select ${cols} from public.${name} ${where} ${order} ${limit}`, values));
       return send(res, 200, pgJson(r.rows));
     }
     if (req.method === 'POST') {
@@ -208,6 +209,15 @@ async function authApi(req, res, url) {
   const route = url.pathname.replace('/auth/v1/', '');
   if (route === 'otp') {
     const email = json.email.toLowerCase();
+    // Como o Supabase: o usuário é criado no pedido do código; gatilhos em auth.users podem recusar.
+    try {
+      await serial(async () => {
+        const found = (await db.query('select 1 from auth.users where email = $1', [email])).rows.length;
+        if (!found) await db.query('insert into auth.users (id, email) values ($1, $2)', [randomUUID(), email]);
+      });
+    } catch {
+      return send(res, 500, { code: 500, error_code: 'unexpected_failure', msg: 'Database error saving new user' });
+    }
     const code = String(Math.floor(100000 + Math.random() * 900000));
     codes.set(email, code);
     console.log(`[mock-supabase] código de ${email}: ${code}`);
@@ -217,13 +227,8 @@ async function authApi(req, res, url) {
     const email = json.email.toLowerCase();
     if (codes.get(email) !== json.token) return send(res, 403, { code: 'otp_expired', error_code: 'otp_expired', msg: 'Token has expired or is invalid' });
     codes.delete(email);
-    const user = await serial(async () => {
-      const found = (await db.query('select id, email from auth.users where email = $1', [email])).rows[0];
-      if (found) return found;
-      const id = randomUUID();
-      await db.query('insert into auth.users (id, email) values ($1, $2)', [id, email]);
-      return { id, email };
-    });
+    const user = await serial(async () => (await db.query('select id, email from auth.users where email = $1', [email])).rows[0]);
+    if (!user) return send(res, 403, { code: 'otp_expired', error_code: 'otp_expired', msg: 'Token has expired or is invalid' });
     return send(res, 200, session(user));
   }
   if (route.startsWith('token')) {

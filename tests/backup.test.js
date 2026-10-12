@@ -26,11 +26,11 @@ describe('buildBackup / parseBackup', () => {
     const r = parseBackup(JSON.stringify({
       app: 'rota-express', version: 1,
       settings: { orsKey: 'x' },
-      history: [route('h1', '2026-01-01T00:00:00Z', [{ id: 's', delivered: true, deliveredAt: 'T' }]), { lixo: true }],
+      history: [route('h1', '2026-01-01T00:00:00Z', [{ id: 's', delivered: true, deliveredAt: '2026-01-01T10:00:00Z' }]), { lixo: true }],
       photos: { a: 'data:image/jpeg;base64,AA', b: 'javascript:alert(1)', c: 42 },
     }));
     expect(r.history).toHaveLength(1);
-    expect(r.history[0].stops[0]).toEqual({ id: 's', outcome: 'delivered', outcomeAt: 'T' });
+    expect(r.history[0].stops[0]).toEqual({ id: 's', address: '', status: 'pending', outcome: 'delivered', outcomeAt: '2026-01-01T10:00:00Z' });
     expect(Object.keys(r.photos)).toEqual(['a']);
     expect(r.settings).toEqual({});
     expect(r.current).toBeNull();
@@ -60,5 +60,15 @@ describe('utilitários', () => {
     const cur = route('c', null, [{ id: 'x', hasPhoto: true }, { id: 'y' }]);
     expect(photoIds(cur, [route('h', 'T', [{ id: 'z', hasPhoto: true }])])).toEqual(['x', 'z']);
     expect(photoIds(null, [])).toEqual([]);
+  });
+});
+
+describe('dataUrlToBlob', () => {
+  it('decodifica foto do backup sem rede e recusa outros tipos', async () => {
+    const { dataUrlToBlob } = await import('../src/lib/photos.js');
+    const blob = dataUrlToBlob('data:image/jpeg;base64,/9j/4AAQ');
+    expect(blob.type).toBe('image/jpeg');
+    expect(blob.size).toBe(6);
+    expect(() => dataUrlToBlob('data:image/svg+xml;base64,PHN2Zz4=')).toThrow();
   });
 });

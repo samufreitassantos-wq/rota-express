@@ -55,3 +55,13 @@ export const blobToDataUrl = (blob) =>
     r.onerror = () => reject(r.error);
     r.readAsDataURL(blob);
   });
+
+/** Converte "data:image/...;base64,..." em Blob localmente (sem fetch — compatível com a CSP). */
+export function dataUrlToBlob(url) {
+  const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(url);
+  if (!m) throw new Error('Foto do backup em formato inválido.');
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: m[1] });
+}

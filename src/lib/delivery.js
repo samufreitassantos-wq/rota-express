@@ -41,7 +41,10 @@ export function moveTo(order, id, to) {
 export const moveBy = (order, id, delta) => moveTo(order, id, order.indexOf(id) + delta);
 
 const csvCell = (v) => {
-  const s = String(v ?? '');
+  let s = String(v ?? '');
+  // Injeção de fórmulas (OWASP "CSV Injection"): texto começando com = + - @ ou tab/CR vira
+  // fórmula no Excel/Sheets. Prefixa com apóstrofo; números (ex.: -23.5) ficam como estão.
+  if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(s) && !/^-?\d+([.,]\d+)?$/.test(s)) s = `'${s}`;
   return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 

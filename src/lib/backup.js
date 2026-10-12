@@ -1,5 +1,6 @@
 // Backup/restauração: um único arquivo JSON com rota atual, histórico, fotos e ajustes.
 import { migrateStop } from './delivery.js';
+import { sanitizeRoute } from './sanitize.js';
 
 export const BACKUP_APP = 'rota-express';
 export const BACKUP_VERSION = 1;
@@ -35,12 +36,14 @@ export function parseBackup(text) {
   if (typeof data.version !== 'number' || data.version > BACKUP_VERSION) {
     throw new Error('Backup criado por uma versão mais nova do app. Atualize o app e tente de novo.');
   }
-  const history = (Array.isArray(data.history) ? data.history : []).filter(isRoute);
-  const current = isRoute(data.current) ? data.current : null;
+  // Arquivo de backup pode ter sido adulterado: cada rota é higienizada.
+  const history = (Array.isArray(data.history) ? data.history : []).filter(isRoute).map(sanitizeRoute).filter(Boolean);
+  const current = isRoute(data.current) ? sanitizeRoute(data.current) : null;
   for (const r of [current, ...history].filter(Boolean)) r.stops.forEach(migrateStop);
   const photos = {};
   for (const [id, url] of Object.entries(data.photos ?? {})) {
-    if (typeof url === 'string' && url.startsWith('data:image/')) photos[id] = url;
+    // Só fotos JPEG/PNG/WebP em base64 (nada de SVG ou outros tipos que possam conter scripts).
+    if (typeof url === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(url) && /^[A-Za-z0-9_-]{1,64}$/.test(id)) photos[id] = url;
   }
   const settings = data.settings && typeof data.settings === 'object' ? { ...data.settings } : {};
   delete settings.orsKey;

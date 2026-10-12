@@ -11,7 +11,7 @@ const SUPABASE_STUB = `
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   create schema storage;
-  create table storage.buckets (id text primary key, name text, public boolean);
+  create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
   create table storage.objects (id serial primary key, bucket_id text, name text);
   create function storage.foldername(name text) returns text[] language sql immutable as
     $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
@@ -53,13 +53,20 @@ beforeAll(async () => {
   await db.exec(schema);
   await db.exec(schema); // idempotente
   await db.exec(readFileSync(new URL('../supabase/admin.sql', import.meta.url), 'utf8').replaceAll('seu-email@exemplo.com', 'chefe@ex.com'));
-  await db.exec(`insert into auth.users values
-    ('${ADMIN}', 'Chefe@ex.com'), ('${ANA}', 'ana@ex.com'), ('${BETO}', 'beto@ex.com'), ('${INTRUSO}', 'intruso@ex.com');`);
+  await db.exec(`insert into auth.users values ('${ADMIN}', 'Chefe@ex.com');`);
 });
 
 describe('acesso por convite', () => {
-  it('admin entra; e-mail não liberado não recebe perfil', async () => {
+  it('e-mail não liberado nem consegue criar conta (sem disparo de código)', async () => {
+    expect(await fails(db.exec(`insert into auth.users values ('${INTRUSO}', 'intruso@ex.com')`))).toBe(true);
+  });
+
+  it('admin entra; conta sem liberação não recebe perfil', async () => {
     expect((await as(ADMIN, 'select role from claim_access()')).rows).toEqual([{ role: 'admin' }]);
+    // Conta criada antes do gatilho existir (ou liberada e depois removida) não ganha acesso
+    await db.exec(`alter table auth.users disable trigger only_allowed_signup;
+      insert into auth.users values ('${INTRUSO}', 'intruso@ex.com');
+      alter table auth.users enable trigger only_allowed_signup;`);
     expect((await as(INTRUSO, 'select * from claim_access()')).rows).toEqual([]);
   });
 
@@ -67,6 +74,7 @@ describe('acesso por convite', () => {
     expect(await fails(as(ANA, `select admin_allow_email('ana@ex.com')`))).toBe(true);
     await as(ADMIN, `select admin_allow_email('Ana@ex.com', 'driver')`);
     await as(ADMIN, `select admin_allow_email('beto@ex.com')`);
+    await db.exec(`insert into auth.users values ('${ANA}', 'ana@ex.com'), ('${BETO}', 'beto@ex.com');`); // agora o cadastro é aceito
     expect((await as(ANA, 'select email, role from claim_access()')).rows).toEqual([{ email: 'ana@ex.com', role: 'driver' }]);
     expect((await as(BETO, 'select role from claim_access()')).rows).toEqual([{ role: 'driver' }]);
   });
@@ -113,6 +121,49 @@ describe('rotas', () => {
     expect((await as(ADMIN, `select id from routes where id = 'r-beto'`)).rows).toHaveLength(1);
     await as(ADMIN, `select admin_allow_email('beto@ex.com')`); // liberado de novo
     expect((await as(BETO, 'select id from routes')).rows).toEqual([{ id: 'r-beto' }]);
+  });
+});
+
+describe('reforços de segurança', () => {
+  it('servidor recusa id malicioso (ataque de XSS armazenado) e dados gigantes', async () => {
+    expect(await fails(as(ANA, `insert into routes (id, data) values ('x" onmouseover="alert(1)', '{}')`))).toBe(true);
+    expect(await fails(as(ANA, `insert into routes (id, data) values ('grande', jsonb_build_object('x', repeat('a', 2100000)))`))).toBe(true);
+    await as(ANA, `insert into routes (id, data) values ('ok_id-1', '{}')`);
+  });
+
+  it('horário do servidor é gravado e não pode ser forjado pelo aparelho', async () => {
+    await as(ANA, `update routes set name = 'x', server_updated_at = '2000-01-01' where id = 'ok_id-1'`);
+    const r = (await as(ANA, `select server_updated_at from routes where id = 'ok_id-1'`)).rows[0];
+    expect(new Date(r.server_updated_at).getFullYear()).toBeGreaterThan(2020);
+  });
+
+  it('admin não altera o próprio papel; papel inválido é recusado', async () => {
+    expect(await fails(as(ADMIN, `select admin_allow_email('chefe@ex.com', 'driver')`))).toBe(true);
+    expect(await fails(as(ADMIN, `select admin_allow_email('x@ex.com', 'superadmin')`))).toBe(true);
+  });
+
+  it('auditoria registra ações e exclusões; só admin lê; ninguém escreve direto', async () => {
+    await as(ANA, `delete from routes where id = 'ok_id-1'`);
+    const log = (await as(ADMIN, `select action, target, actor_email from audit_log order by id`)).rows;
+    expect(log.map((l) => l.action)).toEqual(expect.arrayContaining(['acesso_liberado', 'rota_excluida']));
+    expect(log.find((l) => l.action === 'rota_excluida')).toMatchObject({ target: 'ok_id-1', actor_email: 'ana@ex.com' });
+    expect((await as(ANA, 'select * from audit_log')).rows).toEqual([]);
+    expect(await fails(as(ANA, `insert into audit_log (action) values ('forjado')`))).toBe(true);
+    expect(await fails(as(ANA, `select audit('forjado', 'x')`))).toBe(true);
+    expect(await fails(as(ADMIN, `delete from audit_log`))).toBe(true);
+  });
+
+  it('funções auxiliares não ficam expostas a visitantes sem login', async () => {
+    await db.exec(`reset role; set role anon;`);
+    const anonFails = await fails(db.query('select public.is_admin()'));
+    await db.exec('reset role;');
+    expect(anonFails).toBe(true);
+  });
+
+  it('fotos: limite de tamanho e tipos no bucket', async () => {
+    const b = (await db.query(`select file_size_limit, allowed_mime_types from storage.buckets where id = 'photos'`)).rows[0];
+    expect(Number(b.file_size_limit)).toBe(5242880);
+    expect(b.allowed_mime_types).toEqual(['image/jpeg', 'image/png', 'image/webp']);
   });
 });
 
