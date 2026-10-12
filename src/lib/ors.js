@@ -37,7 +37,8 @@ export async function orsGeocode(text, { key, fetchImpl, focus } = {}) {
   const f = data?.features?.[0];
   if (!f) return null;
   const [lng, lat] = f.geometry.coordinates;
-  return { lat, lng, label: f.properties?.label ?? text, confidence: f.properties?.confidence ?? null };
+  // layer "address" = número da casa encontrado; "street"/"locality"... = posição aproximada.
+  return { lat, lng, label: f.properties?.label ?? text, confidence: f.properties?.confidence ?? null, precise: f.properties?.layer === 'address' };
 }
 
 /**

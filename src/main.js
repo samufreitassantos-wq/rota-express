@@ -3,7 +3,7 @@ import './styles/app.css';
 import L from 'leaflet';
 import { extractAddresses, normalizeAddress } from './lib/addressParser.js';
 import { extractPdfText, extractImageText } from './lib/pdf.js';
-import { geocode } from './lib/geocode.js';
+import { geocode, buildQuery } from './lib/geocode.js';
 import { planRoute } from './lib/planner.js';
 import { googleMapsUrl, googleMapsMultiUrl, wazeUrl, MOBILE_MAX_WAYPOINTS } from './lib/navLinks.js';
 import { load, save, remove } from './lib/storage.js';
@@ -13,7 +13,7 @@ import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, t
 import { getPhoto, putPhoto, deletePhotos, clearPhotos, compressImage, requestPersistence, blobToDataUrl, dataUrlToBlob } from './lib/photos.js';
 import { stopWindow, hasWindows, simulate, fmtHHMM, nowMinutes, DEFAULTS as TIMING_DEFAULTS } from './lib/timeWindows.js';
 import { summarize } from './lib/stats.js';
-import { newTracking, ingestFix, observedSpeedKmh, observedServiceMin, isArrived, isFresh, distanceTo, fmtDistance, FAR_FROM_STOP_M } from './lib/tracking.js';
+import { newTracking, ingestFix, observedSpeedKmh, observedServiceMin, isArrived, isFresh, distanceTo, fmtDistance, farFromStopM } from './lib/tracking.js';
 import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from './lib/backup.js';
 import { cloudConfigured, cloud, photoPath } from './lib/cloud.js';
 import { syncOnce, newSyncMeta, pendingCount } from './lib/sync.js';
@@ -178,6 +178,7 @@ function renderStops() {
       <input class="addr" value="${esc(s.address)}" aria-label="Endereço" />
       <div class="meta">
         <span class="tag ${esc(s.status)}">${STATUS_LABEL[s.status] ?? ''}</span>
+        ${s.status === 'ok' && s.precise === false ? `<span class="tag approx" title="${esc(APPROX_HINT)}">≈ aproximada</span>` : ''}
         ${s.label ? `<span class="muted small">${esc(s.label)}</span>` : ''}
       </div>
       <button class="del" title="Remover">🗑</button>
@@ -219,7 +220,7 @@ $('#stops-list').addEventListener('change', (e) => {
   if (!cls.contains('addr')) return;
   const stop = route.stops.find((s) => s.id === e.target.closest('li').dataset.id);
   stop.address = normalizeAddress(e.target.value);
-  Object.assign(stop, { status: 'pending', lat: undefined, lng: undefined, label: undefined });
+  Object.assign(stop, { status: 'pending', lat: undefined, lng: undefined, label: undefined, precise: undefined, pinAdjusted: undefined });
   route.plan = null;
   persist();
   renderStops();
@@ -287,7 +288,7 @@ async function geocodeAll() {
     setStatus('#stops-status', `Localizando ${++done}/${pending.length}...`);
     try {
       const r = await geocode(s.address, { ...opts, focus: route.start?.lat != null ? route.start : undefined });
-      if (r) Object.assign(s, { lat: r.lat, lng: r.lng, label: r.label, status: 'ok' });
+      if (r) Object.assign(s, { lat: r.lat, lng: r.lng, label: r.label, status: 'ok', precise: r.precise, pinAdjusted: undefined });
       else s.status = 'notfound';
     } catch (err) {
       s.status = 'error';
@@ -396,9 +397,14 @@ function etaLine(s, eta) {
   return `<div class="small ${cls}">${parts.join(' · ')}</div>`;
 }
 
+/** Endereço completo usado na navegação (acrescenta a cidade padrão quando falta). */
+const navQuery = (s) => buildQuery(s.address, settings.defaultCity);
+
+const APPROX_HINT = '≈ posição aproximada no mapa (número não encontrado). A navegação usa o endereço; se quiser, arraste o pino até a casa.';
+
 function outcomeLine(s) {
   const arrived = s.arrivedAt ? `Chegou às ${fmtHour(s.arrivedAt)} · ` : '';
-  const far = s.outcomeDistM > FAR_FROM_STOP_M
+  const far = s.outcomeDistM > farFromStopM(s)
     ? `<div class="small warn">📍 Marcado a ${fmtDistance(s.outcomeDistM)} do endereço</div>` : '';
   if (s.outcome === 'delivered') return `<div class="muted small">${arrived}Entregue às ${fmtHour(s.outcomeAt)}</div>${far}`;
   if (s.outcome === 'failed') return `<div class="small fail-text">${arrived}Problema às ${fmtHour(s.outcomeAt)}</div>${far}`;
@@ -425,10 +431,11 @@ function stopItem(s, i, next, openIds, eta) {
     <div class="num">${i + 1}</div>
     <div class="body">
       <div class="addr">${esc(s.address)}</div>
+      ${!s.outcome && s.precise === false ? `<div class="small muted">${esc(APPROX_HINT)}</div>` : ''}
       ${s.outcome ? outcomeLine(s) : outcomeLine(s) + etaLine(s, eta)}
       <div class="actions">
-        <a class="btn" href="${googleMapsUrl(s)}" target="_blank" rel="noopener">Google Maps</a>
-        <a class="btn" href="${wazeUrl(s)}" target="_blank" rel="noopener">Waze</a>
+        <a class="btn" href="${esc(googleMapsUrl(s, navQuery(s)))}" target="_blank" rel="noopener">Google Maps</a>
+        <a class="btn" href="${esc(wazeUrl(s, navQuery(s)))}" target="_blank" rel="noopener">Waze</a>
         ${pending
           ? '<button class="set-delivered primary">✓ Entregue</button><button class="set-failed danger">✗ Problema</button>'
           : '<button class="undo">Desfazer</button>'}
@@ -466,7 +473,7 @@ function renderRoute() {
   const pendingStops = stops.filter((s) => !s.outcome);
   const next = pendingStops[0];
   const p = route.plan;
-  const multi = googleMapsMultiUrl(pendingStops);
+  const multi = googleMapsMultiUrl(pendingStops, navQuery);
   $('#route-summary').innerHTML = `
     <div><b>${st.delivered}/${st.total}</b> entregues${st.failed ? ` · <span class="fail-text">${st.failed} com problema</span>` : ''} · ${fmtKm(p.distance)} · ${fmtDur(p.duration)}</div>
     <div class="progress"><span style="width:${(st.delivered / st.total) * 100}%"></span><span class="failed" style="width:${(st.failed / st.total) * 100}%"></span></div>
@@ -479,7 +486,7 @@ function renderRoute() {
       ${reorderMode ? '' : route.tracking?.active
         ? '<button id="btn-gps-stop">⏸ Pausar GPS</button><button id="btn-gps-center">📍 Onde estou</button>'
         : '<button id="btn-gps-start" class="accent">▶ Iniciar rota (GPS)</button>'}
-      ${multi && !reorderMode ? `<a class="btn primary" href="${multi}" target="_blank" rel="noopener">Google Maps: próximas ${Math.min(pendingStops.length, MOBILE_MAX_WAYPOINTS + 1)}</a>` : ''}
+      ${multi && !reorderMode ? `<a class="btn primary" href="${esc(multi)}" target="_blank" rel="noopener">Google Maps: próximas ${Math.min(pendingStops.length, MOBILE_MAX_WAYPOINTS + 1)}</a>` : ''}
       <button id="btn-reorder" class="${reorderMode ? 'accent' : ''}">${reorderMode ? 'Concluir reordenação' : '↕ Reordenar'}</button>
       ${!p.roadGeometry && settings.orsKey && !reorderMode ? '<button id="btn-redraw">Recalcular traçado</button>' : ''}
       ${reorderMode ? '' : '<button id="btn-export-csv">Exportar CSV</button><button id="btn-report">Relatório PDF</button>'}
@@ -495,10 +502,11 @@ function renderRoute() {
   stops.forEach((s, i) => {
     const icon = L.divIcon({ className: `pin ${s.outcome === 'delivered' ? 'done' : s.outcome === 'failed' ? 'failed' : ''} ${s === next ? 'next' : ''}`, html: `<span>${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
     const m = L.marker([s.lat, s.lng], { icon, draggable: true }).addTo(layer);
-    m.bindPopup(`<b>${i + 1}.</b> ${esc(s.address)}<br><small>Arraste o pino para corrigir a posição.</small>`);
+    m.bindPopup(`<b>${i + 1}.</b> ${esc(s.address)}<br><small>${s.precise === false ? '≈ Posição aproximada (só a rua). ' : ''}Arraste o pino para corrigir a posição.</small>`);
     m.on('dragend', () => {
       const { lat, lng } = m.getLatLng();
-      Object.assign(s, { lat, lng, label: 'Ajustado manualmente' });
+      // Posição confirmada à mão: navegação passa a usar estas coordenadas.
+      Object.assign(s, { lat, lng, label: 'Ajustado manualmente', pinAdjusted: true, precise: true });
       persist();
     });
   });
@@ -1424,7 +1432,7 @@ function renderPerson(personId) {
         <div><b>${esc(r.name)}</b> ${r.finishedAt ? '' : '<span class="tag-role">em andamento</span>'}</div>
         <div class="small muted">${st.delivered}/${st.total} entregues${st.failed ? ` · ${st.failed} com problema` : ''} · atualizada ${new Date(r.updatedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</div>
         <div class="row"><button class="t-csv">Exportar CSV</button><button class="t-pdf">Relatório PDF</button><button class="t-stops">Ver paradas</button></div>
-        <ol class="t-stop-list" hidden>${(r.plan ? orderedStops(r) : r.stops).map((x) => `<li>${esc(x.address)} — ${OUTCOME_LABEL[x.outcome] ?? 'Pendente'}${x.outcomeAt ? ` às ${fmtHour(x.outcomeAt)}` : ''}${x.outcome === 'failed' && x.failReason ? ` (${esc(x.failReason)})` : ''}${x.outcomeDistM > FAR_FROM_STOP_M ? ` · <span class="warn">📍 a ${fmtDistance(x.outcomeDistM)}</span>` : ''}</li>`).join('')}</ol>
+        <ol class="t-stop-list" hidden>${(r.plan ? orderedStops(r) : r.stops).map((x) => `<li>${esc(x.address)} — ${OUTCOME_LABEL[x.outcome] ?? 'Pendente'}${x.outcomeAt ? ` às ${fmtHour(x.outcomeAt)}` : ''}${x.outcome === 'failed' && x.failReason ? ` (${esc(x.failReason)})` : ''}${x.outcomeDistM > farFromStopM(x) ? ` · <span class="warn">📍 a ${fmtDistance(x.outcomeDistM)}</span>` : ''}</li>`).join('')}</ol>
       </li>`;
     }).join('') || '<li class="muted">Nenhuma rota nos últimos 30 dias.</li>'}</ul>`;
 }

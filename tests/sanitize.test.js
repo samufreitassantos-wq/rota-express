@@ -51,6 +51,12 @@ describe('sanitize', () => {
     expect(sanitizeStop({ id: 's', outcome: 'failed', delivered: true }).outcome).toBe('failed');
   });
 
+  it('mantém o indicador de precisão (verdadeiro/falso/desconhecido) e o pino ajustado', () => {
+    expect(sanitizeStop({ id: 's', precise: false }).precise).toBe(false);
+    expect(sanitizeStop({ id: 's', precise: true, pinAdjusted: true })).toMatchObject({ precise: true, pinAdjusted: true });
+    expect(sanitizeStop({ id: 's', precise: 'x' }).precise).toBeUndefined();
+  });
+
   it('ids', () => {
     expect(safeId('ok_ID-1')).toBe('ok_ID-1');
     expect(safeId('../x')).toBe('___x');

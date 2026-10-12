@@ -5,6 +5,10 @@ import { haversine } from './geo.js';
 export const MAX_ACCURACY_M = 60; // leituras piores que isso são ignoradas para distância
 export const ARRIVAL_RADIUS_M = 50;
 export const FAR_FROM_STOP_M = 300; // marcar entrega além disso gera aviso
+// Parada com posição aproximada (só a rua era conhecida): tolerâncias maiores para não dar alarme falso.
+const APPROX_ARRIVAL_M = 150;
+const APPROX_FAR_M = 800;
+export const farFromStopM = (stop) => (stop?.precise === false ? APPROX_FAR_M : FAR_FROM_STOP_M);
 const MAX_SPEED_MS = 42; // ~150 km/h: acima disso é salto de GPS
 const MOVING_SPEED_MS = 1.5; // abaixo disso consideramos parado (entregando, semáforo...)
 const MAX_GAP_S = 300; // depois de 5 min sem leitura (app em segundo plano), não soma o tempo
@@ -66,7 +70,8 @@ export const distanceTo = (fix, stop) => haversine(fix, stop);
 
 /** Chegou à parada? Raio mínimo de 50 m, ampliado pela imprecisão da leitura (até 100 m). */
 export function isArrived(fix, stop) {
-  const radius = Math.min(100, Math.max(ARRIVAL_RADIUS_M, fix.acc ?? 0));
+  const base = stop.precise === false ? APPROX_ARRIVAL_M : ARRIVAL_RADIUS_M;
+  const radius = Math.min(base + 50, Math.max(base, fix.acc ?? 0));
   return distanceTo(fix, stop) <= radius;
 }
 

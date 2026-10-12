@@ -3,7 +3,7 @@
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 import { OUTCOME_LABEL, routeStats } from './delivery.js';
-import { FAR_FROM_STOP_M, fmtDistance } from './tracking.js';
+import { farFromStopM, fmtDistance } from './tracking.js';
 
 const PHOTO_W = 34; // mm
 const PHOTO_MAX_H = 34;
@@ -16,7 +16,7 @@ export function reportRows(stops) {
     s.address,
     (OUTCOME_LABEL[s.outcome] ?? 'Pendente') + (s.outcome === 'failed' && s.failReason ? `\n${s.failReason}` : ''),
     [s.arrivedAt && `Chegou ${fmtTime(s.arrivedAt)}`, s.outcomeAt && fmtDateTime(s.outcomeAt)].filter(Boolean).join('\n'),
-    [s.note, s.outcomeDistM > FAR_FROM_STOP_M && `Marcado a ${fmtDistance(s.outcomeDistM)} do endereço`].filter(Boolean).join('\n'),
+    [s.note, s.outcomeDistM > farFromStopM(s) && `Marcado a ${fmtDistance(s.outcomeDistM)} do endereço`].filter(Boolean).join('\n'),
     '',
   ]);
 }

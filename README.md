@@ -9,7 +9,7 @@ Aplicativo web (PWA) de roteirização de entregas, pensado para celular e table
 - **Localização (geocodificação)**: OpenRouteService quando há chave; sem chave, Nominatim (OpenStreetMap, gratuito, 1 req/s). Resultados ficam em cache no aparelho.
 - **Otimização de rota** (30–60 paradas): OpenRouteService (VROOM) quando há chave; caso contrário ou em caso de falha, heurística local (vizinho mais próximo + 2-opt) em distância de linha reta.
 - **Mapa interativo** (Leaflet + OpenStreetMap) com pinos numerados; arraste um pino para corrigir a posição.
-- **Botões Google Maps e Waze** para navegar até cada parada.
+- **Botões Google Maps e Waze** para navegar até cada parada, enviando o **endereço escrito** (o Google acha o número da casa). Paradas em que o mapa gratuito só achou a rua aparecem como **≈ aproximada**; ajustar o pino à mão faz a navegação usar a posição confirmada.
 - **Registro de entregas**: "Entregue" ou "Problema" (com motivo: ausente, recusado, local fechado...), horário, observação e **foto de comprovante** (comprimida e guardada no aparelho).
 - **Horário de entrega por parada** (ex.: das 14:00 às 16:00) considerado na otimização (ORS ou local), com **previsão de chegada** ao vivo, término previsto e alerta de atraso. Velocidade média e tempo por parada ajustáveis.
 - **Reordenar paradas** manualmente (▲▼ ou "Fazer a seguir").

@@ -3,7 +3,8 @@
 import { orsGeocode } from './ors.js';
 import { load, save } from './storage.js';
 
-const CACHE_KEY = 'geocache';
+// v2: resultados passaram a indicar se o número da casa foi encontrado (precise).
+const CACHE_KEY = 'geocache2';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let lastNominatim = 0;
 
@@ -12,11 +13,12 @@ async function nominatim(text, fetchImpl = fetch) {
   if (wait > 0) await sleep(wait);
   lastNominatim = Date.now();
   const url = new URL('https://nominatim.openstreetmap.org/search');
-  url.search = new URLSearchParams({ q: text, format: 'jsonv2', countrycodes: 'br', limit: '1', 'accept-language': 'pt-BR' });
+  url.search = new URLSearchParams({ q: text, format: 'jsonv2', countrycodes: 'br', limit: '1', addressdetails: '1', 'accept-language': 'pt-BR' });
   const res = await fetchImpl(url.toString(), { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`Nominatim ${res.status}`);
   const [hit] = await res.json();
-  return hit ? { lat: Number(hit.lat), lng: Number(hit.lon), label: hit.display_name, confidence: null } : null;
+  // Sem número da casa no OpenStreetMap, o ponto é o meio da rua (posição aproximada).
+  return hit ? { lat: Number(hit.lat), lng: Number(hit.lon), label: hit.display_name, confidence: null, precise: Boolean(hit.address?.house_number) } : null;
 }
 
 /** Monta o texto de busca, acrescentando a cidade padrão se o endereço não tiver cidade/CEP. */
