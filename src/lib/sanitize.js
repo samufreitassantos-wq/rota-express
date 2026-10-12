@@ -22,6 +22,7 @@ const num = (v, min = -Infinity, max = Infinity) => {
 };
 const date = (v) => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v.slice(0, 40) : undefined);
 const bool = (v) => (v === true ? true : undefined);
+const tri = (v) => (v === true || v === false ? v : undefined);
 const lat = (v) => num(v, -90, 90);
 const lng = (v) => num(v, -180, 180);
 const point = (p) => (p && lat(p.lat) != null && lng(p.lng) != null ? { lat: lat(p.lat), lng: lng(p.lng) } : undefined);
@@ -50,6 +51,8 @@ export function sanitizeStop(s) {
     outcomeAt: date(s.outcomeAt) ?? (s.outcome === undefined ? date(s.deliveredAt) : undefined),
     failReason: str(s.failReason, 100),
     note: str(s.note, 1000),
+    precise: tri(s.precise),
+    pinAdjusted: bool(s.pinAdjusted),
     hasPhoto: bool(s.hasPhoto),
     photoSynced: bool(s.photoSynced),
     windowStart: HHMM_RE.test(s.windowStart ?? '') ? s.windowStart : undefined,

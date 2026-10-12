@@ -16,6 +16,7 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - `src/lib/pdf.js` — texto de PDF via pdf.js (build **legacy**, necessária no Safari/iPad); páginas sem texto vão para OCR
 - `src/lib/ocr.js` — Tesseract.js com arquivos em `public/ocr/` (gerados por `scripts/copy-ocr-assets.mjs` no predev/prebuild; não versionados)
 - `src/lib/timeWindows.js` — janelas de horário (windowStart/windowEnd "HH:MM"), simulação de ETA e otimização local com janelas (puro, testado)
+- `src/lib/navLinks.js` — links Google Maps/Waze pelo ENDEREÇO (OSM no Brasil raramente tem número; coordenadas viram o meio da rua). Coordenadas só com `stop.pinAdjusted`. `stop.precise=false` = geocodificação só achou a rua
 - `src/lib/delivery.js` — situação da entrega (outcome: delivered/failed), reordenação, CSV (puro, testado)
 - `src/lib/reportPdf.js` — relatório PDF com jsPDF (não usar window.print: não funciona no app instalado no iOS)
 - `src/lib/tracking.js` — GPS: km/velocidade reais, chegada (raio 50 m), tempo real por parada; `route.tracking`, `stop.arrivedAt/outcomeFix/outcomeDistM` (puro, testado). iOS só envia GPS com o app aberto; usamos Wake Lock

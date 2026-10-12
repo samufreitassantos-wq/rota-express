@@ -137,3 +137,4 @@ table.team tr.inactive { opacity: .6; }
 .t-stop-list { margin: 8px 0 0; padding-left: 22px; font-size: .9rem; }
 .t-stop-list li { padding: 3px 0; }
 #allow-form select { margin-left: 0; }
+.tag.approx { color: var(--warn); }

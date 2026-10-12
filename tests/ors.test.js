@@ -10,7 +10,7 @@ describe('cliente ORS (fetch simulado)', () => {
   it('geocode envia a chave no cabeçalho e lê [lng, lat]', async () => {
     const fetchImpl = vi.fn(() => ok({ features: [{ geometry: { coordinates: [-46.6, -23.5] }, properties: { label: 'X', confidence: 0.9 } }] }));
     const r = await orsGeocode('Rua A, 1', { key: 'k', fetchImpl });
-    expect(r).toEqual({ lat: -23.5, lng: -46.6, label: 'X', confidence: 0.9 });
+    expect(r).toEqual({ lat: -23.5, lng: -46.6, label: 'X', confidence: 0.9, precise: false });
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toContain('/geocode/search');
     expect(url).not.toContain('k&');
@@ -80,5 +80,23 @@ describe('buildQuery', () => {
     expect(buildQuery('Rua A, 1', 'Campinas - SP')).toBe('Rua A, 1, Campinas - SP');
     expect(buildQuery('Rua A, 1, 13010-000', 'Campinas - SP')).toBe('Rua A, 1, 13010-000');
     expect(buildQuery('Rua A, 1, Santos - SP', 'Campinas - SP')).toBe('Rua A, 1, Santos - SP');
+  });
+});
+
+describe('precisão da geocodificação', () => {
+  it('ORS: layer address = preciso; street = aproximado', async () => {
+    const mk = (layer) => vi.fn(() => ok({ features: [{ geometry: { coordinates: [-46.6, -23.5] }, properties: { label: 'X', layer } }] }));
+    expect((await orsGeocode('Rua A, 1', { key: 'k', fetchImpl: mk('address') })).precise).toBe(true);
+    expect((await orsGeocode('Rua A, 1', { key: 'k', fetchImpl: mk('street') })).precise).toBe(false);
+  });
+
+  it('Nominatim: sem house_number = aproximado; pede addressdetails', async () => {
+    const { geocode } = await import('../src/lib/geocode.js');
+    const fetchImpl = vi.fn((url) => ok([{ lat: '-23.5', lon: '-46.6', display_name: 'Rua X', address: url.includes('429') ? { road: 'Rua X' } : { road: 'Rua X', house_number: '10' } }]));
+    const r1 = await geocode('Rua Barbosa de Campos, 429', { fetchImpl });
+    const r2 = await geocode('Rua Y, 10', { fetchImpl });
+    expect(fetchImpl.mock.calls[0][0]).toContain('addressdetails=1');
+    expect(r1.precise).toBe(false);
+    expect(r2.precise).toBe(true);
   });
 });

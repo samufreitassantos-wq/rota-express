@@ -31,10 +31,19 @@ describe('optimizeOrder', () => {
 });
 
 describe('navLinks', () => {
-  it('gera links do Google Maps e Waze', () => {
-    const p = { lat: -23.55, lng: -46.63 };
-    expect(googleMapsUrl(p)).toBe('https://www.google.com/maps/dir/?api=1&destination=-23.55,-46.63&travelmode=driving');
-    expect(wazeUrl(p)).toBe('https://waze.com/ul?ll=-23.55,-46.63&navigate=yes');
-    expect(wazeUrl({ lat: -23.5, lng: -46.63999999999999 })).toBe('https://waze.com/ul?ll=-23.5,-46.64&navigate=yes');
+  const stop = { address: 'Rua Augusta, 1200 - Consolação', lat: -23.55, lng: -46.63 };
+  it('usa o endereço escrito (numeração do Google), não as coordenadas', () => {
+    expect(googleMapsUrl(stop, 'Rua Augusta, 1200 - Consolação, São Paulo - SP')).toBe(
+      'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent('Rua Augusta, 1200 - Consolação, São Paulo - SP') + '&travelmode=driving');
+    expect(wazeUrl(stop, 'Rua Augusta, 1200, São Paulo')).toBe('https://waze.com/ul?q=' + encodeURIComponent('Rua Augusta, 1200, São Paulo') + '&navigate=yes');
+  });
+  it('pino ajustado à mão: usa as coordenadas confirmadas', () => {
+    const p = { ...stop, pinAdjusted: true, lng: -46.63999999999999 };
+    expect(googleMapsUrl(p, 'qualquer')).toBe('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent('-23.55,-46.64') + '&travelmode=driving');
+    expect(wazeUrl(p)).toBe('https://waze.com/ul?ll=-23.55,-46.64&navigate=yes');
+  });
+  it('sem endereço, cai para as coordenadas; remove "|" que quebraria as paradas', () => {
+    expect(wazeUrl({ address: '', lat: -23.5, lng: -46.6 })).toBe('https://waze.com/ul?ll=-23.5,-46.6&navigate=yes');
+    expect(googleMapsUrl({ address: 'Rua A | B, 1' })).toContain(encodeURIComponent('Rua A B, 1'));
   });
 });

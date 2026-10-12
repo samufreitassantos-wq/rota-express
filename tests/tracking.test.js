@@ -57,3 +57,16 @@ describe('chegada e formatação', () => {
     expect(fmtDistance(1234)).toBe('1,2 km');
   });
 });
+
+describe('parada com posição aproximada', () => {
+  it('raio de chegada e limite de "longe" maiores', async () => {
+    const { farFromStopM } = await import('../src/lib/tracking.js');
+    const stop = { lat: 0, lng: 0 };
+    expect(isArrived(fix(0.0012, 0), stop)).toBe(false); // ~133 m
+    expect(isArrived(fix(0.0012, 0), { ...stop, precise: false })).toBe(true);
+    expect(isArrived(fix(0.0025, 0), { ...stop, precise: false })).toBe(false); // ~278 m
+    expect(farFromStopM({ precise: false })).toBe(800);
+    expect(farFromStopM({ precise: true })).toBe(300);
+    expect(farFromStopM({})).toBe(300);
+  });
+});

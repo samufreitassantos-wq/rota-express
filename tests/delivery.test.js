@@ -68,15 +68,16 @@ describe('toCsv', () => {
 });
 
 describe('googleMapsMultiUrl', () => {
-  const pts = [1, 2, 3, 4, 5].map((i) => ({ lat: -23 - i / 10, lng: -46 }));
-  it('usa até 3 paradas intermediárias e a 4ª como destino', () => {
-    expect(googleMapsMultiUrl(pts)).toBe(
-      'https://www.google.com/maps/dir/?api=1&destination=-23.4,-46&waypoints=' +
-        encodeURIComponent('-23.1,-46|-23.2,-46|-23.3,-46') + '&travelmode=driving',
+  const stops = [1, 2, 3, 4, 5].map((i) => ({ address: `Rua ${i}, ${i * 10}`, lat: -23 - i / 10, lng: -46 }));
+  it('usa até 3 paradas intermediárias e a 4ª como destino, pelos endereços', () => {
+    expect(googleMapsMultiUrl(stops, (s) => `${s.address}, São Paulo`)).toBe(
+      'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent('Rua 4, 40, São Paulo') +
+        '&waypoints=' + encodeURIComponent('Rua 1, 10, São Paulo|Rua 2, 20, São Paulo|Rua 3, 30, São Paulo') + '&travelmode=driving',
     );
   });
-  it('com uma parada vira link simples e sem paradas retorna null', () => {
-    expect(googleMapsMultiUrl(pts.slice(0, 1))).toBe('https://www.google.com/maps/dir/?api=1&destination=-23.1,-46&travelmode=driving');
+  it('parada com pino ajustado vai por coordenada; sem paradas retorna null', () => {
+    const url = googleMapsMultiUrl([{ ...stops[0], pinAdjusted: true }]);
+    expect(url).toBe('https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent('-23.1,-46') + '&travelmode=driving');
     expect(googleMapsMultiUrl([])).toBeNull();
   });
 });
