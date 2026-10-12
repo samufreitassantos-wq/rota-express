@@ -10,13 +10,14 @@ import { load, save, remove } from './lib/storage.js';
 import { orsDirections } from './lib/ors.js';
 import { haversine } from './lib/geo.js';
 import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from './lib/delivery.js';
-import { getPhoto, putPhoto, deletePhotos, clearPhotos, compressImage, requestPersistence, blobToDataUrl } from './lib/photos.js';
+import { getPhoto, putPhoto, deletePhotos, clearPhotos, compressImage, requestPersistence, blobToDataUrl, dataUrlToBlob } from './lib/photos.js';
 import { stopWindow, hasWindows, simulate, fmtHHMM, nowMinutes, DEFAULTS as TIMING_DEFAULTS } from './lib/timeWindows.js';
 import { summarize } from './lib/stats.js';
 import { newTracking, ingestFix, observedSpeedKmh, observedServiceMin, isArrived, isFresh, distanceTo, fmtDistance, FAR_FROM_STOP_M } from './lib/tracking.js';
 import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from './lib/backup.js';
 import { cloudConfigured, cloud, photoPath } from './lib/cloud.js';
 import { syncOnce, newSyncMeta, pendingCount } from './lib/sync.js';
+import { sanitizeRoute } from './lib/sanitize.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -35,8 +36,9 @@ function timing() {
   const service = observedServiceMin(route?.stops ?? []);
   return { speedKmh: speed ?? t.speedKmh, serviceMin: service ?? t.serviceMin, observedSpeed: speed, observedService: service };
 }
-let route = load('current', null) ?? newRoute();
-let history = load('history', []);
+// Tudo que vem do armazenamento passa pela higienização (tipos garantidos antes de chegar à tela).
+let route = sanitizeRoute(load('current', null)) ?? newRoute();
+let history = (Array.isArray(load('history', [])) ? load('history', []) : []).map(sanitizeRoute).filter(Boolean);
 // Dados salvos pela versão anterior usavam delivered/deliveredAt.
 route.stops.forEach(migrateStop);
 history.forEach((h) => h.stops.forEach(migrateStop));
@@ -172,15 +174,15 @@ function renderStops() {
     ? `Partida: ${route.start.label ?? `${route.start.lat.toFixed(5)}, ${route.start.lng.toFixed(5)}`}`
     : 'Defina a partida (endereço ou GPS). Sem partida, a primeira parada é usada.';
   $('#stops-list').innerHTML = route.stops.map((s) => `
-    <li data-id="${s.id}" class="stop ${s.status}">
+    <li data-id="${esc(s.id)}" class="stop ${esc(s.status)}">
       <input class="addr" value="${esc(s.address)}" aria-label="Endereço" />
       <div class="meta">
-        <span class="tag ${s.status}">${STATUS_LABEL[s.status] ?? ''}</span>
+        <span class="tag ${esc(s.status)}">${STATUS_LABEL[s.status] ?? ''}</span>
         ${s.label ? `<span class="muted small">${esc(s.label)}</span>` : ''}
       </div>
       <button class="del" title="Remover">🗑</button>
       <details class="tw" ${stopWindow(s) ? 'open' : ''}>
-        <summary>⏰ ${windowLabel(s) ?? 'Horário livre'}</summary>
+        <summary>⏰ ${esc(windowLabel(s) ?? 'Horário livre')}</summary>
         <div class="tw-row">
           <label class="small">Das <input class="tw-start" type="time" value="${esc(s.windowStart ?? '')}" /></label>
           <label class="small">até <input class="tw-end" type="time" value="${esc(s.windowEnd ?? '')}" /></label>
@@ -383,7 +385,7 @@ function etaLine(s, eta) {
   if (!eta && !win) return '';
   const parts = [];
   if (eta) parts.push(`Previsão ~${fmtHHMM(eta.arrival)}`);
-  if (win) parts.push(`⏰ ${win}`);
+  if (win) parts.push(`⏰ ${esc(win)}`);
   let cls = 'muted';
   if (eta?.late > 0) {
     cls = 'fail-text';
@@ -406,7 +408,7 @@ function outcomeLine(s) {
 function stopItem(s, i, next, openIds, eta) {
   const pending = !s.outcome;
   if (reorderMode) {
-    return `<li data-id="${s.id}" class="rstop ${s.outcome ?? ''} ${s === next ? 'next' : ''}">
+    return `<li data-id="${esc(s.id)}" class="rstop ${esc(s.outcome ?? '')} ${s === next ? 'next' : ''}">
       <div class="num">${i + 1}</div>
       <div class="body">
         <div class="addr">${esc(s.address)}</div>
@@ -419,7 +421,7 @@ function stopItem(s, i, next, openIds, eta) {
     </li>`;
   }
   const extras = [s.note ? '📝' : '', s.hasPhoto ? '📷' : ''].join('');
-  return `<li data-id="${s.id}" class="rstop ${s.outcome ?? ''} ${s === next ? 'next' : ''}">
+  return `<li data-id="${esc(s.id)}" class="rstop ${esc(s.outcome ?? '')} ${s === next ? 'next' : ''}">
     <div class="num">${i + 1}</div>
     <div class="body">
       <div class="addr">${esc(s.address)}</div>
@@ -443,7 +445,7 @@ function stopItem(s, i, next, openIds, eta) {
           </label>
           ${s.hasPhoto ? '<button class="photo-del">Remover foto</button>' : ''}
         </div>
-        ${s.hasPhoto ? `<img class="thumb" data-photo="${s.id}" alt="Foto do comprovante" />` : ''}
+        ${s.hasPhoto ? `<img class="thumb" data-photo="${esc(s.id)}" alt="Foto do comprovante" />` : ''}
       </details>
     </div>
   </li>`;
@@ -491,7 +493,7 @@ function renderRoute() {
   setTimeout(updateGpsView, 0);
   L.polyline(p.geometry, { color: '#0f766e', weight: 4, opacity: 0.8, dashArray: p.roadGeometry ? null : '6 6' }).addTo(layer);
   stops.forEach((s, i) => {
-    const icon = L.divIcon({ className: `pin ${s.outcome === 'delivered' ? 'done' : s.outcome ?? ''} ${s === next ? 'next' : ''}`, html: `<span>${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
+    const icon = L.divIcon({ className: `pin ${s.outcome === 'delivered' ? 'done' : s.outcome === 'failed' ? 'failed' : ''} ${s === next ? 'next' : ''}`, html: `<span>${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
     const m = L.marker([s.lat, s.lng], { icon, draggable: true }).addTo(layer);
     m.bindPopup(`<b>${i + 1}.</b> ${esc(s.address)}<br><small>Arraste o pino para corrigir a posição.</small>`);
     m.on('dragend', () => {
@@ -915,7 +917,7 @@ function renderHistory() {
   }
   $('#history-list').innerHTML = history.map((h) => {
     const st = routeStats(h.plan ? orderedStops(h) : h.stops);
-    return `<li data-id="${h.id}" class="card">
+    return `<li data-id="${esc(h.id)}" class="card">
       <div><b>${esc(h.name)}</b></div>
       <div class="muted small">${st.delivered}/${st.total} entregues${st.failed ? ` · ${st.failed} com problema` : ''} · ${h.plan ? fmtKm(h.plan.distance) : '—'} · finalizada ${h.finishedAt ? new Date(h.finishedAt).toLocaleString('pt-BR') : '—'}</div>
       <div class="row">
@@ -1034,7 +1036,7 @@ $('#restore-input').addEventListener('change', async (e) => {
     let restoredPhotos = 0;
     for (const [id, url] of Object.entries(b.photos)) {
       if (!keptIds.has(id)) continue;
-      await putPhoto(id, await (await fetch(url)).blob());
+      await putPhoto(id, dataUrlToBlob(url));
       restoredPhotos++;
     }
     if (restoredPhotos) requestPersistence();
@@ -1206,12 +1208,18 @@ $('#auth-form-email').addEventListener('submit', async (e) => {
   const btn = $('#btn-send-code');
   btn.disabled = true;
   setStatus('#auth-status', 'Enviando código...');
+  // Mesma resposta para e-mail liberado ou não: não revela quem tem acesso (enumeração de contas).
+  const generic = () => {
+    $('#auth-email-shown').textContent = email;
+    showAuth('code', 'Se este e-mail tiver acesso, você receberá um código em instantes. Confira também a caixa de spam.', 'ok');
+  };
   try {
     await cloud.sendCode(email);
-    $('#auth-email-shown').textContent = email;
-    showAuth('code', 'Código enviado. Confira também a caixa de spam.', 'ok');
+    generic();
   } catch (err) {
-    setStatus('#auth-status', /rate|seconds/i.test(err.message) ? 'Aguarde um minuto antes de pedir outro código.' : `Não foi possível enviar: ${err.message}`, 'error');
+    if (/rate|seconds|security purposes/i.test(err.message)) setStatus('#auth-status', 'Aguarde um minuto antes de pedir outro código.', 'error');
+    else if (/database error|not allowed|signups/i.test(err.message)) generic(); // e-mail não liberado
+    else setStatus('#auth-status', 'Não foi possível enviar o código. Verifique a internet e tente de novo.', 'error');
   } finally {
     btn.disabled = false;
   }
@@ -1320,13 +1328,17 @@ document.addEventListener('visibilitychange', () => {
 setInterval(() => scheduleSync(0), 120000);
 
 // ---- Equipe (administrador) ----
-let team = { profiles: [], allowed: [], routes: [], loadedAt: 0, person: null, period: 'today' };
+let team = { profiles: [], allowed: [], routes: [], audit: [], loadedAt: 0, person: null, period: 'today' };
+const AUDIT_LABEL = { acesso_liberado: 'Acesso liberado', acesso_removido: 'Acesso removido', papel_alterado: 'Papel alterado', rota_excluida: 'Rota excluída' };
 
 async function loadTeam() {
-  const [profiles, allowed, rows] = await Promise.all([cloud.listProfiles(), cloud.listAllowed(), cloud.fetchTeamRoutes(30)]);
-  const routes = rows.map((row) => ({ ...row.data, ownerId: row.user_id, updatedAt: row.updated_at }));
+  const [profiles, allowed, rows, audit] = await Promise.all([
+    cloud.listProfiles(), cloud.listAllowed(), cloud.fetchTeamRoutes(30), cloud.listAudit(30).catch(() => []),
+  ]);
+  // Dados de outras pessoas: higienizados antes de qualquer exibição (proteção contra XSS armazenado).
+  const routes = rows.map((row) => sanitizeRoute({ ...row.data, id: row.id, ownerId: row.user_id, updatedAt: row.updated_at })).filter(Boolean);
   routes.forEach((r) => r.stops.forEach(migrateStop));
-  team = { ...team, profiles, allowed, routes, loadedAt: Date.now() };
+  team = { ...team, profiles, allowed, routes, audit, loadedAt: Date.now() };
 }
 
 async function renderTeam(reload = false) {
@@ -1365,7 +1377,7 @@ async function renderTeam(reload = false) {
       <thead><tr><th>Pessoa</th><th>Entregas</th><th>Sucesso</th><th>Km</th><th>Agora</th></tr></thead>
       <tbody>${rows.map(({ p, s, live, last }) => {
         const st = live && routeStats(orderedStops(live));
-        return `<tr data-person="${p.id}" class="${p.active ? '' : 'inactive'}">
+        return `<tr data-person="${esc(p.id)}" class="${p.active ? '' : 'inactive'}">
           <td><b>${esc(p.name || p.email)}</b>${p.name ? `<br><span class="small muted">${esc(p.email)}</span>` : ''}${p.role === 'admin' ? ' <span class="tag-role">admin</span>' : ''}${p.active ? '' : ' <span class="small fail-text">sem acesso</span>'}</td>
           <td>${s.delivered}${s.failed ? ` <span class="small fail-text">+${s.failed}✗</span>` : ''}</td>
           <td>${pct(s.successRate)}</td>
@@ -1386,7 +1398,12 @@ async function renderTeam(reload = false) {
       const p = team.profiles.find((x) => x.email === a.email);
       return `<li><span>${esc(a.email)} · ${a.role === 'admin' ? 'Administrador' : 'Entregador'}${p ? '' : ' · <span class="muted">ainda não entrou</span>'}</span>
         ${a.email === account.email ? '<span class="muted small">você</span>' : `<button class="revoke danger" data-email="${esc(a.email)}">Remover</button>`}</li>`;
-    }).join('')}</ul>`;
+    }).join('')}</ul>
+    <details class="extra">
+      <summary>Registro de atividades (últimas ${team.audit.length})</summary>
+      <ul class="reasons">${team.audit.map((ev) => `<li><span><b>${esc(AUDIT_LABEL[ev.action] ?? ev.action)}</b> · ${esc(ev.target ?? '')}<br>
+        <span class="small muted">${new Date(ev.at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${esc(ev.actor_email ?? 'sistema')}</span></span></li>`).join('') || '<li class="muted">Nenhum evento registrado.</li>'}</ul>
+    </details>`;
 }
 
 function renderPerson(personId) {
@@ -1403,7 +1420,7 @@ function renderPerson(personId) {
     </div>
     <ul class="list">${routes.map((r) => {
       const st = routeStats(r.plan ? orderedStops(r) : r.stops);
-      return `<li class="card" data-route="${r.id}">
+      return `<li class="card" data-route="${esc(r.id)}">
         <div><b>${esc(r.name)}</b> ${r.finishedAt ? '' : '<span class="tag-role">em andamento</span>'}</div>
         <div class="small muted">${st.delivered}/${st.total} entregues${st.failed ? ` · ${st.failed} com problema` : ''} · atualizada ${new Date(r.updatedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</div>
         <div class="row"><button class="t-csv">Exportar CSV</button><button class="t-pdf">Relatório PDF</button><button class="t-stops">Ver paradas</button></div>

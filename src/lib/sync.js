@@ -7,6 +7,7 @@
 // Conflito: vale a versão com `updatedAt` mais recente (a rota inteira).
 // Rota que já tinha sido sincronizada e sumiu da nuvem foi excluída em outro aparelho.
 import { photoPath } from './cloudPaths.js';
+import { sanitizeRoute, isSafeId } from './sanitize.js';
 
 export const newSyncMeta = () => ({ synced: {}, deleted: [] });
 
@@ -96,8 +97,9 @@ export async function syncOnce({ adapter, userId, state, meta, getPhoto, now = (
   }
 
   for (const row of remote) {
-    if (pushedIds.has(row.id)) continue;
-    const data = { ...row.data, updatedAt: row.updated_at };
+    if (pushedIds.has(row.id) || !isSafeId(row.id)) continue;
+    const data = sanitizeRoute({ ...row.data, id: row.id, updatedAt: row.updated_at });
+    if (!data) continue;
     const isCurrent = current?.id === row.id;
     const local = isCurrent ? current : history.find((h) => h.id === row.id);
     if (local) {

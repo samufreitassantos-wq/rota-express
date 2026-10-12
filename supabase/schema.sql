@@ -75,6 +75,10 @@ create or replace function public.admin_allow_email(p_email text, p_role text de
 language plpgsql security definer set search_path = public as $$
 begin
   if not public.is_admin() then raise exception 'Somente administradores'; end if;
+  if p_role not in ('driver', 'admin') then raise exception 'Papel inválido'; end if;
+  if lower(trim(p_email)) = (select email from public.profiles where id = auth.uid()) then
+    raise exception 'Você não pode alterar o seu próprio papel';
+  end if;
   insert into public.allowed_emails (email, role) values (lower(trim(p_email)), p_role)
   on conflict (email) do update set role = excluded.role;
   update public.profiles set role = p_role, active = true where email = lower(trim(p_email));
@@ -94,6 +98,10 @@ begin
 end;
 $$;
 
+revoke all on function public.is_member() from public, anon;
+revoke all on function public.is_admin() from public, anon;
+grant execute on function public.is_member() to authenticated;
+grant execute on function public.is_admin() to authenticated;
 revoke all on function public.admin_allow_email(text, text) from public, anon;
 revoke all on function public.admin_revoke_email(text) from public, anon;
 revoke all on function public.claim_access() from public, anon;
@@ -166,3 +174,94 @@ create policy "fotos: dono substitui" on storage.objects for update to authentic
 drop policy if exists "fotos: dono apaga" on storage.objects;
 create policy "fotos: dono apaga" on storage.objects for delete to authenticated
   using (bucket_id = 'photos' and (storage.foldername(name))[1] = auth.uid()::text and public.is_member());
+
+-- ===================== Reforços de segurança (v2) =====================
+
+-- Validações no servidor (NOT VALID: não falha em dados antigos, vale para tudo que entrar).
+alter table public.routes drop constraint if exists routes_id_format;
+alter table public.routes add constraint routes_id_format check (id ~ '^[A-Za-z0-9_-]{1,64}$') not valid;
+alter table public.routes drop constraint if exists routes_data_size;
+alter table public.routes add constraint routes_data_size check (pg_column_size(data) <= 2000000) not valid;
+alter table public.routes drop constraint if exists routes_name_len;
+alter table public.routes add constraint routes_name_len check (char_length(coalesce(name, '')) <= 200) not valid;
+alter table public.profiles drop constraint if exists profiles_name_len;
+alter table public.profiles add constraint profiles_name_len check (char_length(coalesce(name, '')) <= 120) not valid;
+
+-- Horário do servidor em cada gravação (não controlado pelo aparelho) + limite de rotas por pessoa.
+alter table public.routes add column if not exists server_updated_at timestamptz not null default now();
+create or replace function public.routes_before_write() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  new.server_updated_at := now();
+  if tg_op = 'INSERT' and (select count(*) from public.routes where user_id = new.user_id) >= 5000 then
+    raise exception 'Limite de rotas atingido para esta conta';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists routes_before_write on public.routes;
+create trigger routes_before_write before insert or update on public.routes for each row execute function public.routes_before_write();
+
+-- Registro de auditoria: só o banco escreve (gatilhos/funções); só administradores leem.
+create table if not exists public.audit_log (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  actor uuid default auth.uid(),
+  actor_email text,
+  action text not null,
+  target text,
+  details jsonb
+);
+alter table public.audit_log enable row level security;
+revoke all on public.audit_log from public, anon, authenticated;
+grant select on public.audit_log to authenticated;
+drop policy if exists "admin lê auditoria" on public.audit_log;
+create policy "admin lê auditoria" on public.audit_log for select to authenticated using (public.is_admin());
+
+create or replace function public.audit(p_action text, p_target text, p_details jsonb default null) returns void
+language sql security definer set search_path = public as $$
+  insert into public.audit_log (actor, actor_email, action, target, details)
+  values (auth.uid(), (select email from public.profiles where id = auth.uid()), p_action, p_target, p_details);
+$$;
+revoke all on function public.audit(text, text, jsonb) from public, anon, authenticated;
+
+create or replace function public.audit_allowed_emails() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then perform public.audit('acesso_removido', old.email, null);
+  elsif tg_op = 'INSERT' then perform public.audit('acesso_liberado', new.email, jsonb_build_object('papel', new.role));
+  elsif new.role is distinct from old.role then perform public.audit('papel_alterado', new.email, jsonb_build_object('de', old.role, 'para', new.role));
+  end if;
+  return null;
+end;
+$$;
+drop trigger if exists audit_allowed_emails on public.allowed_emails;
+create trigger audit_allowed_emails after insert or update or delete on public.allowed_emails for each row execute function public.audit_allowed_emails();
+
+create or replace function public.audit_routes_delete() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.audit('rota_excluida', old.id, jsonb_build_object('dono', old.user_id, 'nome', old.name, 'finalizada', old.finished_at));
+  return null;
+end;
+$$;
+drop trigger if exists audit_routes_delete on public.routes;
+create trigger audit_routes_delete after delete on public.routes for each row execute function public.audit_routes_delete();
+
+-- Cadastro só para e-mails liberados: impede criar contas (e disparar e-mails de código) para
+-- qualquer endereço. Contas já existentes não são afetadas.
+create or replace function public.only_allowed_signup() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.allowed_emails where email = lower(new.email)) then
+    raise exception 'Cadastro não permitido';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists only_allowed_signup on auth.users;
+create trigger only_allowed_signup before insert on auth.users for each row execute function public.only_allowed_signup();
+
+-- Fotos: até 5 MB, somente imagens comuns (o app envia JPEG comprimido de ~100–300 KB).
+update storage.buckets set file_size_limit = 5242880, allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp']
+where id = 'photos';

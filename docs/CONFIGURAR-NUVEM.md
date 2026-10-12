@@ -68,6 +68,9 @@ editáveis depois do passo 3).
 > Se um e-mail chegar com **link** em vez de código ("Confirm your email address"), é porque o
 > modelo **Confirm signup** ainda está no padrão. Ajuste-o e peça um novo código no app.
 
+> Recomendado (segurança): **Authentication › Sign In / Providers › Email › Email OTP
+> Expiration = 600** (o código vale 10 minutos).
+
 ## 5. Ligar o app ao Supabase
 
 1. No Supabase: **Project Settings** › **API Keys** (ou **API**). Copie:
@@ -90,6 +93,11 @@ são as regras de acesso do passo 2.
 3. As rotas que já estavam no aparelho são enviadas para a sua conta.
 4. Aba **Equipe** › **Acesso ao app**: digite o e-mail de cada entregador › **Liberar acesso**.
 5. Cada entregador instala o app, entra com o próprio e-mail e o código.
+
+## Atualizações do banco
+
+Quando o app receber melhorias de segurança no banco, rode de novo o `supabase/schema.sql`
+inteiro no SQL Editor (é seguro repetir). Detalhes em [`SEGURANCA.md`](SEGURANCA.md).
 
 ## Como funciona o acesso
 

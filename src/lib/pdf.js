@@ -42,7 +42,8 @@ export async function extractPdfText(file, { onProgress } = {}) {
     pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
   }
-  const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  // isEvalSupported: false — não usa eval/new Function (compatível com a CSP do app).
+  const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false });
   try {
     const doc = await task.promise;
     const pages = [];

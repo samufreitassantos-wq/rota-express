@@ -94,6 +94,10 @@ export const cloud = {
   async revokeEmail(email) {
     check(await (await sb()).rpc('admin_revoke_email', { p_email: email }));
   },
+  /** Últimos eventos do registro de auditoria (só administradores leem; regra no banco). */
+  async listAudit(limit = 30) {
+    return check(await (await sb()).from('audit_log').select('at,actor_email,action,target,details').order('at', { ascending: false }).limit(limit));
+  },
   /** Rotas de todos atualizadas nos últimos `days` dias (as regras do banco garantem que só admin vê tudo). */
   async fetchTeamRoutes(days = 30) {
     const since = new Date(Date.now() - days * 864e5).toISOString();
