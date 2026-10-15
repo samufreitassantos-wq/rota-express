@@ -18,6 +18,8 @@ import { buildBackup, parseBackup, mergeHistory, backupFileName, photoIds } from
 import { cloudConfigured, cloud, photoPath } from './lib/cloud.js';
 import { syncOnce, newSyncMeta, pendingCount } from './lib/sync.js';
 import { sanitizeRoute } from './lib/sanitize.js';
+import { readSpreadsheet, isSpreadsheetName, parseDelimited, looksTabular } from './lib/spreadsheet.js';
+import { FIELDS, detectColumns, rowsToItems, headerSignature, columnName } from './lib/columns.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -107,9 +109,16 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
 
 // ---------- Importação ----------
 $('#pdf-input').addEventListener('change', async (e) => {
-  const files = [...e.target.files];
+  const all = [...e.target.files];
   e.target.value = '';
-  if (!files.length) return;
+  if (!all.length) return;
+  const sheetFiles = all.filter((f) => isSpreadsheetName(f.name));
+  const files = all.filter((f) => !sheetFiles.includes(f));
+  if (files.length) await importDocuments(files, { stay: sheetFiles.length > 0 });
+  if (sheetFiles.length) await importSheets(sheetFiles);
+});
+
+async function importDocuments(files, { stay = false } = {}) {
   const texts = [];
   let ocrUsed = false;
   for (const [i, f] of files.entries()) {
@@ -138,31 +147,194 @@ $('#pdf-input').addEventListener('change', async (e) => {
     setStatus('#import-status', 'Nenhum texto encontrado no arquivo.', 'error');
     return;
   }
-  importAddresses(extractAddresses(text).map((a) => a.address), ocrUsed);
-});
+  importAddresses(extractAddresses(text).map((a) => a.address), { ocrUsed, stay });
+}
 
 $('#btn-extract').addEventListener('click', () => {
-  importAddresses(extractAddresses($('#raw-text').value).map((a) => a.address));
+  const text = $('#raw-text').value;
+  // Células copiadas do Excel/Google Planilhas chegam separadas por TAB.
+  if (looksTabular(text)) {
+    sheetQueue = [{ name: 'Células coladas', sheets: [{ name: 'Colado', rows: parseDelimited(text, '\t') }] }];
+    openNextSheet();
+    return;
+  }
+  importAddresses(extractAddresses(text).map((a) => a.address));
 });
 $('#btn-one-per-line').addEventListener('click', () => {
   const lines = $('#raw-text').value.split(/\r?\n/).map(normalizeAddress).filter(Boolean);
   importAddresses(lines);
 });
 
-function importAddresses(addresses, ocrUsed = false) {
-  const existing = new Set(route.stops.map((s) => s.address.toLowerCase()));
-  const fresh = addresses.filter((a) => !existing.has(a.toLowerCase()));
-  if (!fresh.length) {
-    setStatus('#import-status', 'Nenhum endereço novo encontrado. Tente "1 linha = 1 endereço" ou edite o texto.', 'error');
+/** Adiciona endereços (texto ou { address, ref }); o mesmo endereço vira uma parada só, juntando as referências. */
+function importAddresses(items, { ocrUsed = false, stay = false } = {}) {
+  const byAddress = new Map(route.stops.map((s) => [s.address.toLowerCase(), s]));
+  let added = 0;
+  let merged = 0;
+  for (const item of items) {
+    const { address, ref } = typeof item === 'string' ? { address: item, ref: '' } : item;
+    const key = address.toLowerCase();
+    const same = byAddress.get(key);
+    if (same) {
+      if (ref && !(same.ref ?? '').includes(ref)) {
+        same.ref = (same.ref ? `${same.ref} | ${ref}` : ref).slice(0, 300);
+        merged++;
+      }
+      continue;
+    }
+    const stop = { id: uid(), address, status: 'pending', outcome: null, ...(ref ? { ref: ref.slice(0, 300) } : {}) };
+    route.stops.push(stop);
+    byAddress.set(key, stop);
+    added++;
+  }
+  if (!added) {
+    if (merged) persist();
+    setStatus('#import-status', merged
+      ? `Nenhum endereço novo; ${merged} parada(s) receberam as informações da planilha.`
+      : 'Nenhum endereço novo encontrado. Tente "1 linha = 1 endereço" ou edite o texto.', merged ? 'ok' : 'error');
     return;
   }
-  route.stops.push(...fresh.map((address) => ({ id: uid(), address, status: 'pending', outcome: null })));
   route.plan = null;
   persist();
-  setStatus('#import-status', `${fresh.length} endereço(s) adicionados. Revise na aba Paradas.`, 'ok');
+  const sameNote = merged ? ` ${merged} endereço(s) repetido(s) foram juntados na mesma parada.` : '';
+  setStatus('#import-status', `${added} endereço(s) adicionados. Revise na aba Paradas.${sameNote}`, 'ok');
+  if (stay) return;
   showTab('stops');
   if (ocrUsed) setStatus('#stops-status', 'Texto lido de imagem (OCR): confira números e nomes de rua antes de otimizar.', 'warn');
 }
+
+// ---------- Planilhas ----------
+let sheetQueue = []; // arquivos de planilha esperando a conferência das colunas
+let sheet = null; // { name, sheets, sheetIdx, rows, headerRow, mapping }
+const SHEET_MAPS_MAX = 30;
+
+async function importSheets(files) {
+  const errors = [];
+  for (const f of files) {
+    setStatus('#import-status', `Lendo ${f.name}...`);
+    try {
+      const { sheets } = await readSpreadsheet(f);
+      if (!sheets.length) errors.push(`${f.name}: planilha vazia.`);
+      else sheetQueue.push({ name: f.name, sheets });
+    } catch (err) {
+      errors.push(`Erro ao ler ${f.name}: ${err.message}`);
+    }
+  }
+  if (!sheet) openNextSheet();
+  setStatus('#import-status', errors.join(' '), errors.length ? 'error' : '');
+}
+
+function openNextSheet() {
+  const next = sheetQueue.shift();
+  if (!next) {
+    sheet = null;
+    $('#sheet-card').hidden = true;
+    return;
+  }
+  sheet = { name: next.name, sheets: next.sheets, sheetIdx: 0 };
+  $('#sheet-title').textContent = next.name;
+  $('#sheet-pick').innerHTML = next.sheets.map((s, i) => `<option value="${i}">${esc(s.name)} (${s.rows.length} linhas)</option>`).join('');
+  $('#sheet-pick-wrap').hidden = next.sheets.length < 2;
+  // Primeira aba em que se acha uma coluna de endereço; senão, a primeira.
+  const found = next.sheets.findIndex((s) => detectColumns(s.rows).mapping.address != null);
+  selectSheet(Math.max(0, found));
+  $('#sheet-card').hidden = false;
+  showTab('import');
+  $('#sheet-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function selectSheet(idx) {
+  sheet.sheetIdx = idx;
+  sheet.rows = sheet.sheets[idx].rows;
+  $('#sheet-pick').value = String(idx);
+  const det = detectColumns(sheet.rows);
+  sheet.headerRow = det.headerRow;
+  sheet.mapping = det.mapping;
+  // Mesmo modelo de planilha já importado antes: usa as colunas escolhidas naquela vez.
+  if (det.headerRow >= 0) {
+    const saved = load('sheetMaps', {})[headerSignature(det.headers)];
+    if (saved && typeof saved === 'object') sheet.mapping = sanitizeMapping(saved, det.headers.length);
+  }
+  $('#sheet-header-row').innerHTML = [
+    '<option value="-1">Sem títulos</option>',
+    ...sheet.rows.slice(0, 15).map((r, i) => `<option value="${i}">Linha ${i + 1}: ${esc(r.filter(Boolean).join(' | ').slice(0, 60))}</option>`),
+  ].join('');
+  $('#sheet-header-row').value = String(sheet.headerRow);
+  renderSheet();
+}
+
+function sanitizeMapping(m, ncols) {
+  const out = {};
+  for (const { key } of FIELDS) {
+    const c = Number(m[key]);
+    if (Number.isInteger(c) && c >= 0 && c < Math.max(ncols, 1)) out[key] = c;
+  }
+  return out;
+}
+
+function sheetColumns() {
+  const n = Math.max(0, ...sheet.rows.slice(0, 200).map((r) => r.length));
+  const headers = sheet.headerRow >= 0 ? sheet.rows[sheet.headerRow] : [];
+  return Array.from({ length: n }, (_, i) => columnName(headers, i));
+}
+
+function renderSheet() {
+  const cols = sheetColumns();
+  $('#sheet-fields').innerHTML = FIELDS.map(({ key, label }) => {
+    const sel = sheet.mapping[key];
+    return `<label class="${sel != null ? 'found' : ''}">${esc(label)}
+      <select data-field="${esc(key)}">
+        <option value="-1">— não usar —</option>
+        ${cols.map((c, i) => `<option value="${i}" ${sel === i ? 'selected' : ''}>${esc(c.slice(0, 60))}</option>`).join('')}
+      </select></label>`;
+  }).join('');
+  renderSheetPreview();
+}
+
+function renderSheetPreview() {
+  const { items, skipped } = rowsToItems(sheet.rows, sheet);
+  sheet.items = items;
+  $('#sheet-preview').innerHTML = items.slice(0, 5).map((it) => `<li>${esc(it.address)}${it.ref ? `<div class="ref">${esc(it.ref)}</div>` : ''}</li>`).join('')
+    || '<li class="muted">Nenhum endereço encontrado com estas colunas.</li>';
+  const freeText = sheet.mapping.address == null ? ' Sem coluna de endereço: lendo o texto de cada linha.' : '';
+  $('#sheet-summary').textContent = `${items.length} endereço(s)${skipped ? `, ${skipped} linha(s) sem endereço ignoradas` : ''}.${freeText}`;
+  const btn = $('#btn-sheet-import');
+  btn.textContent = items.length ? `Importar ${items.length} endereço(s)` : 'Importar';
+  btn.disabled = !items.length;
+}
+
+$('#sheet-pick').addEventListener('change', (e) => selectSheet(Number(e.target.value)));
+$('#sheet-header-row').addEventListener('change', (e) => {
+  sheet.headerRow = Number(e.target.value);
+  renderSheet();
+});
+$('#sheet-fields').addEventListener('change', (e) => {
+  const sel = e.target.closest('select[data-field]');
+  if (!sel) return;
+  const col = Number(sel.value);
+  if (col < 0) delete sheet.mapping[sel.dataset.field];
+  else sheet.mapping[sel.dataset.field] = col;
+  sel.parentElement.classList.toggle('found', col >= 0);
+  renderSheetPreview();
+});
+$('#btn-sheet-cancel').addEventListener('click', () => {
+  setStatus('#import-status', `${sheet.name}: importação cancelada.`);
+  openNextSheet();
+});
+$('#btn-sheet-import').addEventListener('click', () => {
+  if (sheet.headerRow >= 0) {
+    const maps = load('sheetMaps', {});
+    const sig = headerSignature(sheet.rows[sheet.headerRow]);
+    delete maps[sig];
+    maps[sig] = sheet.mapping;
+    const keys = Object.keys(maps);
+    for (const k of keys.slice(0, Math.max(0, keys.length - SHEET_MAPS_MAX))) delete maps[k];
+    save('sheetMaps', maps);
+  }
+  const items = sheet.items;
+  const more = sheetQueue.length > 0;
+  openNextSheet();
+  importAddresses(items, { stay: more });
+});
 
 // ---------- Paradas ----------
 const STATUS_LABEL = { pending: '…', ok: '✓', notfound: '✗ não encontrado', error: '⚠ erro' };
@@ -176,6 +348,7 @@ function renderStops() {
   $('#stops-list').innerHTML = route.stops.map((s) => `
     <li data-id="${esc(s.id)}" class="stop ${esc(s.status)}">
       <input class="addr" value="${esc(s.address)}" aria-label="Endereço" />
+      ${s.ref ? `<div class="ref small">${esc(s.ref)}</div>` : ''}
       <div class="meta">
         <span class="tag ${esc(s.status)}">${STATUS_LABEL[s.status] ?? ''}</span>
         ${s.status === 'ok' && s.precise === false ? `<span class="tag approx" title="${esc(APPROX_HINT)}">≈ aproximada</span>` : ''}
@@ -418,6 +591,7 @@ function stopItem(s, i, next, openIds, eta) {
       <div class="num">${i + 1}</div>
       <div class="body">
         <div class="addr">${esc(s.address)}</div>
+        ${s.ref ? `<div class="ref small">${esc(s.ref)}</div>` : ''}
         ${pending ? `<div class="actions">
           <button class="mv-up" aria-label="Subir">▲</button>
           <button class="mv-down" aria-label="Descer">▼</button>
@@ -431,6 +605,7 @@ function stopItem(s, i, next, openIds, eta) {
     <div class="num">${i + 1}</div>
     <div class="body">
       <div class="addr">${esc(s.address)}</div>
+      ${s.ref ? `<div class="ref small">${esc(s.ref)}</div>` : ''}
       ${!s.outcome && s.precise === false ? `<div class="small muted">${esc(APPROX_HINT)}</div>` : ''}
       ${s.outcome ? outcomeLine(s) : outcomeLine(s) + etaLine(s, eta)}
       <div class="actions">

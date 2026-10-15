@@ -138,3 +138,16 @@ table.team tr.inactive { opacity: .6; }
 .t-stop-list li { padding: 3px 0; }
 #allow-form select { margin-left: 0; }
 .tag.approx { color: var(--warn); }
+
+/* Importação de planilha */
+.help { margin: 8px 0; }
+.help summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--primary); font-weight: 600; }
+.sheet-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+label.inline { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.sheet-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 12px; margin: 8px 0; }
+.sheet-fields label { display: flex; flex-direction: column; font-weight: 600; margin: 0; }
+.sheet-fields select { margin-left: 0; width: 100%; }
+.sheet-fields label.found select { border-color: var(--primary); }
+.sheet-preview { margin: 4px 0 8px; padding-left: 22px; }
+.sheet-preview li { margin-bottom: 4px; }
+.ref { color: var(--muted, #64748b); overflow-wrap: anywhere; }

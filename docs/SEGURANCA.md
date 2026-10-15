@@ -11,7 +11,7 @@ não foi acessado: daqui não há acesso a ele.
 
 | Parte | Tecnologia | Onde roda |
 |---|---|---|
-| App (PWA) | Vite + JavaScript, Leaflet, pdf.js, Tesseract.js, jsPDF | Navegador; publicado no GitHub Pages (HTTPS) |
+| App (PWA) | Vite + JavaScript, Leaflet, pdf.js, Tesseract.js, jsPDF, fflate (planilhas) | Navegador; publicado no GitHub Pages (HTTPS) |
 | Login | Supabase Auth: código de 6 dígitos (OTP) por e-mail, sem senhas | Supabase |
 | Banco | Postgres (Supabase) com Row Level Security | Supabase |
 | Fotos | Supabase Storage, bucket privado `photos` | Supabase |
@@ -120,7 +120,8 @@ Legenda: **IV** implementado e verificado · **INT** implementado, não testado 
 | Dados no aparelho | PAR | `localStorage`/IndexedDB **sem criptografia do app**; dependem do bloqueio do aparelho (senha/biometria) |
 | Fotos: bucket privado, pasta por pessoa | IV (local) | Teste de storage |
 | Fotos: limite de tamanho e tipo | INT | Configuração do bucket (aplicada pelo servidor de Storage do Supabase; o PGlite não a executa) |
-| Dependências | IV | `npm audit`: 0 vulnerabilidades (12/10/2026) |
+| Planilhas importadas (.xlsx/.ods/.csv) | IV | Lidas só no aparelho. Não usamos o pacote `xlsx` do npm (versão 0.18.5 com CVE-2023-30533 e CVE-2024-22363); leitor próprio sobre `fflate`: só os XML necessários, limite de 15 MB no arquivo e 60 MB por XML descompactado (zip bomb), 5000 linhas × 100 colunas, sem entidades externas (XXE), leitura linear (teste: XML malformado com 20 mil tags abertas < 2 s). Textos da planilha passam por `sanitizeStop` e `esc()` (teste e2e: `<b>` na referência vira texto) |
+| Dependências | IV | `npm audit`: 0 vulnerabilidades (15/10/2026, com `fflate` 0.8.3) |
 | SSRF, webhooks, injeção de comandos | N/A | Não há backend próprio |
 
 ### Auditoria, disponibilidade e recuperação

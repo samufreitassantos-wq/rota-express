@@ -64,3 +64,12 @@ describe('sanitize', () => {
     expect(sanitizeRoute({ id: 'x' })).toBeNull();
   });
 });
+
+describe('referência da parada (planilha)', () => {
+  it('mantém texto e limita o tamanho', async () => {
+    const { sanitizeStop } = await import('../src/lib/sanitize.js');
+    expect(sanitizeStop({ id: 'a', address: 'Rua A', ref: '<img src=x onerror=alert(1)>' }).ref).toBe('<img src=x onerror=alert(1)>');
+    expect(sanitizeStop({ id: 'a', address: 'Rua A', ref: 'x'.repeat(999) }).ref).toHaveLength(300);
+    expect(sanitizeStop({ id: 'a', address: 'Rua A' })).not.toHaveProperty('ref');
+  });
+});
