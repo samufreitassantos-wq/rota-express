@@ -11,7 +11,7 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - `src/lib/addressParser.js` — extração/normalização de endereços BR (puro, testado)
 - `src/lib/geo.js` — haversine + vizinho mais próximo + 2-opt (puro, testado)
 - `src/lib/ors.js` — cliente OpenRouteService (geocode, optimization, directions)
-- `src/lib/geocode.js` — ORS se houver chave, senão Nominatim; cache no localStorage
+- `src/lib/geocode.js` — ORS se houver chave, senão Nominatim; cache no localStorage. Busca por RUA + NÚMERO + cidade (`queryVariants`): bairro/CEP fazem o Nominatim falhar; depois tenta o endereço completo e por fim só a rua (aproximada)
 - `src/lib/planner.js` — ORS com fallback para otimização local
 - `src/lib/pdf.js` — texto de PDF via pdf.js (build **legacy**, necessária no Safari/iPad); páginas sem texto vão para OCR
 - `src/lib/ocr.js` — Tesseract.js com arquivos em `public/ocr/` (gerados por `scripts/copy-ocr-assets.mjs` no predev/prebuild; não versionados)
