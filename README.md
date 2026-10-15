@@ -5,6 +5,7 @@ Aplicativo web (PWA) de roteirização de entregas, pensado para celular e table
 ## Funcionalidades (v0.1)
 
 - **Importar PDFs** com endereços (texto lido no próprio aparelho com pdf.js), colar texto ou **foto do romaneio**. PDFs escaneados e fotos são lidos com **OCR no aparelho** (Tesseract.js, português) — nenhum arquivo sai do aparelho.
+- **Importar planilhas** do Excel (.xlsx), Google Planilhas (baixar como .xlsx/.csv ou copiar e colar as células), CSV e LibreOffice (.ods). As colunas são reconhecidas pelo título — ex.: *Destination Address*, *Bairro*, *City*, *ZipCode*, Endereço, Número, Cidade, UF, CEP, Cliente, Pedido, Telefone — ou pelo conteúdo, em qualquer modelo; antes de importar você confere a prévia e pode trocar as colunas (o app lembra a escolha para o mesmo modelo). Cliente, pedido, telefone e complemento aparecem na parada, no CSV e no PDF.
 - **Extração e correção** de endereços brasileiros: expande abreviações (R., Av., Al., Tv...), formata CEP, junta linhas de bairro/cidade/CEP, remove duplicados. Cada endereço pode ser editado, removido ou adicionado.
 - **Localização (geocodificação)**: OpenRouteService quando há chave; sem chave, Nominatim (OpenStreetMap, gratuito, 1 req/s). Resultados ficam em cache no aparelho.
 - **Otimização de rota** (30–60 paradas): OpenRouteService (VROOM) quando há chave; caso contrário ou em caso de falha, heurística local (vizinho mais próximo + 2-opt) em distância de linha reta.

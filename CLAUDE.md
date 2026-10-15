@@ -15,6 +15,8 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - `src/lib/planner.js` — ORS com fallback para otimização local
 - `src/lib/pdf.js` — texto de PDF via pdf.js (build **legacy**, necessária no Safari/iPad); páginas sem texto vão para OCR
 - `src/lib/ocr.js` — Tesseract.js com arquivos em `public/ocr/` (gerados por `scripts/copy-ocr-assets.mjs` no predev/prebuild; não versionados)
+- `src/lib/spreadsheet.js` — leitura de .xlsx/.ods (fflate + XML mínimo, com limites) e CSV/TSV; não usar o pacote `xlsx` do npm (vulnerável) (puro, testado; fixtures reais em `tests/fixtures/`)
+- `src/lib/columns.js` — reconhece colunas por título (sinônimos pt/en, títulos cortados) ou conteúdo, monta endereço + `stop.ref` (cliente/pedido/telefone/complemento) (puro, testado). Mapeamento escolhido fica em `rx.sheetMaps` por assinatura dos títulos
 - `src/lib/timeWindows.js` — janelas de horário (windowStart/windowEnd "HH:MM"), simulação de ETA e otimização local com janelas (puro, testado)
 - `src/lib/navLinks.js` — links Google Maps/Waze pelo ENDEREÇO (OSM no Brasil raramente tem número; coordenadas viram o meio da rua). Coordenadas só com `stop.pinAdjusted`. `stop.precise=false` = geocodificação só achou a rua
 - `src/lib/delivery.js` — situação da entrega (outcome: delivered/failed), reordenação, CSV (puro, testado)

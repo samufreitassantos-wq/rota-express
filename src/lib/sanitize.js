@@ -41,6 +41,7 @@ export function sanitizeStop(s) {
   return clean({
     id: safeId(s.id),
     address: str(s.address) ?? '',
+    ref: str(s.ref, 300),
     status: STATUSES.has(s.status) ? s.status : 'pending',
     lat: lat(s.lat),
     lng: lng(s.lng),

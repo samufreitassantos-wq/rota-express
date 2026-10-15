@@ -52,11 +52,31 @@
       <section id="view-import" class="view" data-view="import">
         <h2>Importar endereços</h2>
         <label class="dropzone" for="pdf-input">
-          <strong>Selecionar PDF(s) ou foto do romaneio</strong>
-          <span class="muted">Tudo é lido no próprio aparelho. PDFs escaneados e fotos usam OCR (na 1ª vez baixa ~5 MB do próprio app).</span>
-          <input id="pdf-input" type="file" accept="application/pdf,.pdf,image/*" multiple hidden />
+          <strong>Selecionar PDF, planilha ou foto do romaneio</strong>
+          <span class="muted">PDF, Excel (.xlsx), CSV, LibreOffice (.ods) ou foto. Tudo é lido no próprio aparelho. PDFs escaneados e fotos usam OCR (na 1ª vez baixa ~5 MB do próprio app).</span>
+          <input id="pdf-input" type="file" accept="application/pdf,.pdf,image/*,.xlsx,.xlsm,.ods,.csv,.tsv,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/tab-separated-values,application/vnd.ms-excel" multiple hidden />
         </label>
-        <p class="muted center">ou cole/edite o texto abaixo</p>
+        <details class="help small">
+          <summary>Planilha do Google Planilhas?</summary>
+          <p>No Google Planilhas: <b>Arquivo → Fazer download → Microsoft Excel (.xlsx)</b> e selecione o arquivo acima. Ou selecione as células, copie e cole no campo abaixo.</p>
+          <p>As colunas são reconhecidas pelo título (ex.: Destination Address, Endereço, Bairro, City/Cidade, ZipCode/CEP, Número, Cliente, Pedido). Se o modelo for diferente, você escolhe as colunas antes de importar; o app lembra a escolha para o mesmo modelo.</p>
+        </details>
+        <div id="sheet-card" class="card" hidden>
+          <div class="sheet-head">
+            <strong id="sheet-title"></strong>
+            <label id="sheet-pick-wrap" class="inline" hidden>Aba <select id="sheet-pick"></select></label>
+          </div>
+          <p class="muted small">Confira as colunas reconhecidas e ajuste se precisar.</p>
+          <label class="inline">Linha dos títulos <select id="sheet-header-row"></select></label>
+          <div id="sheet-fields" class="sheet-fields"></div>
+          <p class="small"><b>Prévia</b> <span id="sheet-summary" class="muted"></span></p>
+          <ol id="sheet-preview" class="sheet-preview small"></ol>
+          <div class="row">
+            <button id="btn-sheet-import" class="primary"></button>
+            <button id="btn-sheet-cancel">Cancelar</button>
+          </div>
+        </div>
+        <p class="muted center">ou cole/edite o texto abaixo (também aceita células copiadas de uma planilha)</p>
         <textarea id="raw-text" rows="10" placeholder="Rua das Flores, 123 - Centro&#10;São Paulo - SP 01310-100"></textarea>
         <div class="row">
           <button id="btn-extract" class="primary">Extrair endereços</button>

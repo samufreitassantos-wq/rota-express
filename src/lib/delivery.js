@@ -55,10 +55,11 @@ const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR') : '');
  * `stops` deve estar na ordem de visita.
  */
 export function toCsv(route, stops) {
-  const header = ['Ordem', 'Endereço', 'Situação', 'Motivo', 'Observação', 'Chegada (GPS)', 'Horário', 'Distância do ponto (m)', 'Foto', 'Latitude', 'Longitude'];
+  const header = ['Ordem', 'Endereço', 'Referência', 'Situação', 'Motivo', 'Observação', 'Chegada (GPS)', 'Horário', 'Distância do ponto (m)', 'Foto', 'Latitude', 'Longitude'];
   const rows = stops.map((s, i) => [
     i + 1,
     s.address,
+    s.ref ?? '',
     OUTCOME_LABEL[s.outcome] ?? 'Pendente',
     s.outcome === 'failed' ? s.failReason ?? '' : '',
     s.note ?? '',

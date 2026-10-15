@@ -13,7 +13,7 @@ const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { date
 export function reportRows(stops) {
   return stops.map((s, i) => [
     String(i + 1),
-    s.address,
+    s.ref ? `${s.address}\n${s.ref}` : s.address,
     (OUTCOME_LABEL[s.outcome] ?? 'Pendente') + (s.outcome === 'failed' && s.failReason ? `\n${s.failReason}` : ''),
     [s.arrivedAt && `Chegou ${fmtTime(s.arrivedAt)}`, s.outcomeAt && fmtDateTime(s.outcomeAt)].filter(Boolean).join('\n'),
     [s.note, s.outcomeDistM > farFromStopM(s) && `Marcado a ${fmtDistance(s.outcomeDistM)} do endereço`].filter(Boolean).join('\n'),

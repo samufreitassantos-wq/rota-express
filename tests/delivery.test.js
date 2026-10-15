@@ -40,15 +40,15 @@ describe('toCsv', () => {
   it('gera CSV com ; e escapa campos', () => {
     const csv = toCsv({ createdAt: '2026-10-11T10:00:00Z' }, [
       { address: 'Rua A, 1', outcome: 'delivered', note: 'Portão "azul"; fundos', lat: -23.5, lng: -46.6, hasPhoto: true, outcomeDistM: 12 },
-      { address: 'Rua B, 2', outcome: 'failed', failReason: 'Cliente ausente' },
+      { address: 'Rua B, 2', ref: 'Ana · Pedido 7', outcome: 'failed', failReason: 'Cliente ausente' },
       { address: 'Rua C, 3', outcome: null },
     ]);
     const lines = csv.replace('﻿', '').trim().split('\r\n');
     expect(csv.startsWith('﻿')).toBe(true);
-    expect(lines[0]).toBe('Ordem;Endereço;Situação;Motivo;Observação;Chegada (GPS);Horário;Distância do ponto (m);Foto;Latitude;Longitude');
-    expect(lines[1]).toBe('1;Rua A, 1;Entregue;;"Portão ""azul""; fundos";;;12;sim;-23.500000;-46.600000');
-    expect(lines[2]).toBe('2;Rua B, 2;Problema;Cliente ausente;;;;;;;');
-    expect(lines[3]).toBe('3;Rua C, 3;Pendente;;;;;;;;');
+    expect(lines[0]).toBe('Ordem;Endereço;Referência;Situação;Motivo;Observação;Chegada (GPS);Horário;Distância do ponto (m);Foto;Latitude;Longitude');
+    expect(lines[1]).toBe('1;Rua A, 1;;Entregue;;"Portão ""azul""; fundos";;;12;sim;-23.500000;-46.600000');
+    expect(lines[2]).toBe('2;Rua B, 2;Ana · Pedido 7;Problema;Cliente ausente;;;;;;;');
+    expect(lines[3]).toBe('3;Rua C, 3;;Pendente;;;;;;;;');
   });
   it('neutraliza fórmulas (CSV injection) sem alterar números negativos', () => {
     const csv = toCsv({ createdAt: '2026-10-11T10:00:00Z' }, [
