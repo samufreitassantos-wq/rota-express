@@ -100,3 +100,33 @@ describe('precisão da geocodificação', () => {
     expect(r2.precise).toBe(true);
   });
 });
+
+describe('busca só por rua e número (planilhas)', () => {
+  it('monta a busca com rua + número + cidade, sem bairro e CEP', async () => {
+    const { queryVariants, streetAndNumber } = await import('../src/lib/geocode.js');
+    expect(queryVariants('Rua Augusta, 1500 - Consolação, São Paulo, 01305-100', 'Campinas - SP')[0]).toBe('Rua Augusta, 1500, São Paulo');
+    expect(queryVariants('Rua dos Pinheiros 320 apto 12 - Pinheiros, São Paulo, 05422-000')[0]).toBe('Rua dos Pinheiros, 320, São Paulo');
+    expect(queryVariants('Rua Sete de Setembro, 45 - Centro, Curitiba - PR, 80060-070', 'São Paulo - SP')).toEqual([
+      'Rua Sete de Setembro, 45, Curitiba - PR',
+      'Rua Sete de Setembro, 45 - Centro, Curitiba - PR, 80060-070',
+      'Rua Sete de Setembro, Curitiba',
+    ]);
+    // Sem cidade: usa a cidade padrão dos Ajustes (como na digitação manual)
+    expect(queryVariants('Rua barbosa de campos, 429', 'São Paulo - SP')[0]).toBe('Rua barbosa de campos, 429, São Paulo - SP');
+    expect(streetAndNumber('Rua 25 de Março, 100, São Paulo - SP')).toMatchObject({ street: 'Rua 25 de Março', number: '100' });
+    expect(streetAndNumber('Rua 7 de Setembro 45 - Centro')).toMatchObject({ street: 'Rua 7 de Setembro', number: '45' });
+  });
+
+  it('acha o endereço da planilha que o Nominatim recusaria com bairro e CEP', async () => {
+    const { geocode } = await import('../src/lib/geocode.js');
+    // Simula o Nominatim: não conhece o CEP nem o bairro → sem resultado se aparecerem na busca.
+    const fetchImpl = vi.fn((url) => {
+      const q = new URL(url).searchParams.get('q');
+      return ok(/\d{5}-\d{3}|Consolação/.test(q) ? [] : [{ lat: '-23.55', lon: '-46.66', display_name: q, address: { road: 'Rua Augusta', house_number: '1500' } }]);
+    });
+    const r = await geocode('Rua Augusta, 1500 - Consolação, São Paulo, 01305-100', { fetchImpl });
+    expect(new URL(fetchImpl.mock.calls[0][0]).searchParams.get('q')).toBe('Rua Augusta, 1500, São Paulo');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ lat: -23.55, precise: true });
+  });
+});
