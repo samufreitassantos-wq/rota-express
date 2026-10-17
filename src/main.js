@@ -4,12 +4,13 @@ import L from 'leaflet';
 import { extractAddresses, normalizeAddress } from './lib/addressParser.js';
 import { extractPdfText, extractImageText } from './lib/pdf.js';
 import { geocode, buildQuery } from './lib/geocode.js';
-import { planRoute } from './lib/planner.js';
+import { planStreetRoute } from './lib/planner.js';
+import { streetRuns, streetInfo, moveStreet, reverseStreet } from './lib/streets.js';
 import { googleMapsUrl, googleMapsMultiUrl, wazeUrl, MOBILE_MAX_WAYPOINTS } from './lib/navLinks.js';
 import { load, save, remove } from './lib/storage.js';
 import { orsDirections } from './lib/ors.js';
 import { haversine } from './lib/geo.js';
-import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, moveTo, moveBy, toCsv, routeFileName } from './lib/delivery.js';
+import { FAIL_REASONS, OUTCOME_LABEL, migrateStop, routeStats, toCsv, routeFileName } from './lib/delivery.js';
 import { getPhoto, putPhoto, deletePhotos, clearPhotos, compressImage, requestPersistence, blobToDataUrl, dataUrlToBlob } from './lib/photos.js';
 import { stopWindow, hasWindows, simulate, fmtHHMM, nowMinutes, DEFAULTS as TIMING_DEFAULTS } from './lib/timeWindows.js';
 import { summarize } from './lib/stats.js';
@@ -490,7 +491,7 @@ $('#btn-optimize').addEventListener('click', async () => {
     const start = route.start?.lat != null ? route.start : located[0];
     setStatus('#stops-status', `Otimizando ${located.length} paradas...`);
     const startMin = nowMinutes();
-    const plan = await planRoute(start, located, {
+    const plan = await planStreetRoute(start, located, {
       key: settings.orsKey,
       windows: located.map(stopWindow),
       startMin,
@@ -505,10 +506,11 @@ $('#btn-optimize').addEventListener('click', async () => {
       roadGeometry: plan.roadGeometry,
       warnings: plan.warnings,
       start: { lat: start.lat, lng: start.lng },
+      byStreet: true,
     };
     persist();
     const skipped = route.stops.length - located.length;
-    setStatus('#stops-status', `Rota pronta${skipped ? ` (${skipped} parada(s) sem localização ficaram de fora)` : ''}.`, 'ok');
+    setStatus('#stops-status', `Rota pronta: ${plan.streets} rua(s), ${located.length} entrega(s)${skipped ? ` (${skipped} parada(s) sem localização ficaram de fora)` : ''}.`, 'ok');
     showTab('route');
   } catch (err) {
     setStatus('#stops-status', `Erro ao otimizar: ${err.message}`, 'error');
@@ -584,33 +586,28 @@ function outcomeLine(s) {
   return s.arrivedAt ? `<div class="small ok-text">📍 Chegou às ${fmtHour(s.arrivedAt)}</div>` : '';
 }
 
-function stopItem(s, i, next, openIds, eta) {
+/** "Nº 10" (ou "Sem número") — dentro do grupo da rua, só o número importa. */
+function numberLabel(s) {
+  const n = streetInfo(s.address).number;
+  return n ? `Nº ${n}` : 'Sem número';
+}
+
+function stopItem(s, next, openIds, eta) {
   const pending = !s.outcome;
+  const head = `<div class="addr">${esc(numberLabel(s))}</div>
+      ${s.ref ? `<div class="ref small">${esc(s.ref)}</div>` : ''}
+      <div class="small muted full-addr">${esc(s.address)}</div>`;
   if (reorderMode) {
     return `<li data-id="${esc(s.id)}" class="rstop ${esc(s.outcome ?? '')} ${s === next ? 'next' : ''}">
-      <div class="num">${i + 1}</div>
-      <div class="body">
-        <div class="addr">${esc(s.address)}</div>
-        ${s.ref ? `<div class="ref small">${esc(s.ref)}</div>` : ''}
-        ${pending ? `<div class="actions">
-          <button class="mv-up" aria-label="Subir">▲</button>
-          <button class="mv-down" aria-label="Descer">▼</button>
-          ${s === next ? '' : '<button class="mv-next">Fazer a seguir</button>'}
-        </div>${etaLine(s, eta)}` : outcomeLine(s)}
-      </div>
+      <div class="body">${head}${pending ? etaLine(s, eta) : outcomeLine(s)}</div>
     </li>`;
   }
   const extras = [s.note ? '📝' : '', s.hasPhoto ? '📷' : ''].join('');
   return `<li data-id="${esc(s.id)}" class="rstop ${esc(s.outcome ?? '')} ${s === next ? 'next' : ''}">
-    <div class="num">${i + 1}</div>
     <div class="body">
-      <div class="addr">${esc(s.address)}</div>
-      ${s.ref ? `<div class="ref small">${esc(s.ref)}</div>` : ''}
-      ${!s.outcome && s.precise === false ? `<div class="small muted">${esc(APPROX_HINT)}</div>` : ''}
+      ${head}
       ${s.outcome ? outcomeLine(s) : outcomeLine(s) + etaLine(s, eta)}
       <div class="actions">
-        <a class="btn" href="${esc(googleMapsUrl(s, navQuery(s)))}" target="_blank" rel="noopener">Google Maps</a>
-        <a class="btn" href="${esc(wazeUrl(s, navQuery(s)))}" target="_blank" rel="noopener">Waze</a>
         ${pending
           ? '<button class="set-delivered primary">✓ Entregue</button><button class="set-failed danger">✗ Problema</button>'
           : '<button class="undo">Desfazer</button>'}
@@ -633,6 +630,34 @@ function stopItem(s, i, next, openIds, eta) {
   </li>`;
 }
 
+/** Rua com suas entregas: cabeçalho (ordem, nome, quantidade, navegação) + números. */
+function streetItem(run, k, runsCount, next, openIds, sched) {
+  const total = run.stops.length;
+  const done = run.stops.filter((s) => s.outcome).length;
+  const target = run.stops.find((s) => !s.outcome) ?? run.stops[0];
+  const isNext = run.stops.includes(next);
+  const status = done === total ? 'done' : isNext ? 'next' : '';
+  const actions = reorderMode
+    ? `${k > 0 ? '<button class="st-up" aria-label="Subir rua">▲</button>' : ''}
+       ${k < runsCount - 1 ? '<button class="st-down" aria-label="Descer rua">▼</button>' : ''}
+       ${isNext || done === total ? '' : '<button class="st-next">Fazer a seguir</button>'}
+       ${total > 1 ? '<button class="st-reverse">⇅ Inverter números</button>' : ''}`
+    : `<a class="btn" href="${esc(googleMapsUrl(target, navQuery(target)))}" target="_blank" rel="noopener">Google Maps</a>
+       <a class="btn" href="${esc(wazeUrl(target, navQuery(target)))}" target="_blank" rel="noopener">Waze</a>`;
+  return `<li class="street ${status}" data-run="${k}">
+    <div class="street-head">
+      <div class="num">${k + 1}</div>
+      <div class="body">
+        <div class="street-name">${esc(run.street)}</div>
+        <div class="small muted">${total} entrega${total > 1 ? 's' : ''}${done ? ` · ${done} concluída${done > 1 ? 's' : ''}` : ''} · ${esc(run.stops.map(numberLabel).join(', '))}</div>
+        ${run.stops.some((s) => !s.outcome && s.precise === false) ? `<div class="small muted" title="${esc(APPROX_HINT)}">≈ No mapa, posição aproximada (o mapa gratuito só achou a rua). A navegação usa o endereço com o número.</div>` : ''}
+        <div class="actions">${actions}</div>
+      </div>
+    </div>
+    <ol class="street-stops list">${run.stops.map((s) => stopItem(s, next, openIds, sched.byId[s.id])).join('')}</ol>
+  </li>`;
+}
+
 function renderRoute() {
   ensureMap();
   setTimeout(() => map.invalidateSize(), 0);
@@ -650,7 +675,7 @@ function renderRoute() {
   const p = route.plan;
   const multi = googleMapsMultiUrl(pendingStops, navQuery);
   $('#route-summary').innerHTML = `
-    <div><b>${st.delivered}/${st.total}</b> entregues${st.failed ? ` · <span class="fail-text">${st.failed} com problema</span>` : ''} · ${fmtKm(p.distance)} · ${fmtDur(p.duration)}</div>
+    <div><b>${streetRuns(stops).length}</b> rua(s) · <b>${st.delivered}/${st.total}</b> entregues${st.failed ? ` · <span class="fail-text">${st.failed} com problema</span>` : ''} · ${fmtKm(p.distance)} · ${fmtDur(p.duration)}</div>
     <div class="progress"><span style="width:${(st.delivered / st.total) * 100}%"></span><span class="failed" style="width:${(st.failed / st.total) * 100}%"></span></div>
     ${sched.end != null ? `<div>Término previsto ~<b>${fmtHHMM(sched.end)}</b>${sched.lateCount ? ` · <span class="fail-text">⚠ ${sched.lateCount} parada(s) com atraso previsto</span>` : ''}</div>` : ''}
     <div id="gps-status" class="small"></div>
@@ -667,17 +692,22 @@ function renderRoute() {
       ${reorderMode ? '' : '<button id="btn-export-csv">Exportar CSV</button><button id="btn-report">Relatório PDF</button>'}
     </div>`;
 
-  const openIds = new Set([...document.querySelectorAll('#route-list details[open]')].map((d) => d.closest('li').dataset.id));
-  $('#route-list').innerHTML = stops.map((s, i) => stopItem(s, i, next, openIds, sched.byId[s.id])).join('');
+  const openIds = new Set([...document.querySelectorAll('#route-list details[open]')].map((d) => d.closest('li[data-id]').dataset.id));
+  const runs = streetRuns(stops);
+  $('#route-list').innerHTML = runs.map((run, k) => streetItem(run, k, runs.length, next, openIds, sched)).join('');
   loadThumbs();
 
   if (p.start) L.circleMarker([p.start.lat, p.start.lng], { radius: 8, color: '#1d4ed8', fillOpacity: 0.9 }).bindTooltip('Partida').addTo(layer);
   setTimeout(updateGpsView, 0);
   L.polyline(p.geometry, { color: '#0f766e', weight: 4, opacity: 0.8, dashArray: p.roadGeometry ? null : '6 6' }).addTo(layer);
-  stops.forEach((s, i) => {
-    const icon = L.divIcon({ className: `pin ${s.outcome === 'delivered' ? 'done' : s.outcome === 'failed' ? 'failed' : ''} ${s === next ? 'next' : ''}`, html: `<span>${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
+  // Pinos com o número da rua na ordem (as entregas da mesma rua têm o mesmo número).
+  const streetNo = new Map();
+  runs.forEach((run, k) => run.stops.forEach((s) => streetNo.set(s, k + 1)));
+  stops.forEach((s) => {
+    const k = streetNo.get(s);
+    const icon = L.divIcon({ className: `pin ${s.outcome === 'delivered' ? 'done' : s.outcome === 'failed' ? 'failed' : ''} ${s === next ? 'next' : ''}`, html: `<span>${k}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
     const m = L.marker([s.lat, s.lng], { icon, draggable: true }).addTo(layer);
-    m.bindPopup(`<b>${i + 1}.</b> ${esc(s.address)}<br><small>${s.precise === false ? '≈ Posição aproximada (só a rua). ' : ''}Arraste o pino para corrigir a posição.</small>`);
+    m.bindPopup(`<b>${k}.</b> ${esc(s.address)}<br><small>${s.precise === false ? '≈ Posição aproximada (só a rua). ' : ''}Arraste o pino para corrigir a posição.</small>`);
     m.on('dragend', () => {
       const { lat, lng } = m.getLatLng();
       // Posição confirmada à mão: navegação passa a usar estas coordenadas.
@@ -755,11 +785,28 @@ $('#route-summary').addEventListener('click', async (e) => {
 });
 
 $('#route-list').addEventListener('click', async (e) => {
+  const head = e.target.closest('.street-head');
+  if (head) {
+    const k = Number(head.closest('li[data-run]').dataset.run);
+    const runs = streetRuns(orderedStops()).map((r) => r.stops.map((s) => s.id));
+    const cls = e.target.classList;
+    if (cls.contains('st-up') || cls.contains('st-down')) applyManualOrder(moveStreet(runs, k, k + (cls.contains('st-up') ? -1 : 1)));
+    else if (cls.contains('st-reverse')) applyManualOrder(reverseStreet(runs, k));
+    else if (cls.contains('st-next')) {
+      // Logo depois da rua em andamento (a que já tem entrega feita), senão antes da 1ª pendente.
+      let to = Math.max(0, runs.findIndex((ids) => ids.some((id) => !findStop(id)?.outcome)));
+      if (runs[to]?.some((id) => findStop(id)?.outcome)) to += 1;
+      applyManualOrder(moveStreet(runs, k, k < to ? to - 1 : to));
+    } else if (!e.target.closest('a,button')) {
+      const pts = runs[k].map(findStop).filter((s) => s?.lat != null);
+      if (pts.length) map.fitBounds(L.latLngBounds(pts.map((s) => [s.lat, s.lng])), { maxZoom: 17, padding: [40, 40] });
+    }
+    return;
+  }
   const li = e.target.closest('li[data-id]');
   if (!li) return;
   const s = findStop(li.dataset.id);
   const cls = e.target.classList;
-  const order = route.plan.order;
   if (cls.contains('set-delivered') || cls.contains('set-failed')) {
     s.outcome = cls.contains('set-delivered') ? 'delivered' : 'failed';
     s.outcomeAt = new Date().toISOString();
@@ -777,11 +824,6 @@ $('#route-list').addEventListener('click', async (e) => {
     s.outcomeAt = s.outcomeFix = s.outcomeDistM = undefined;
     persist();
     renderRoute();
-  } else if (cls.contains('mv-up') || cls.contains('mv-down')) {
-    applyManualOrder(moveBy(order, s.id, cls.contains('mv-up') ? -1 : 1));
-  } else if (cls.contains('mv-next')) {
-    const firstPending = order.findIndex((id) => !findStop(id)?.outcome);
-    applyManualOrder(moveTo(order, s.id, firstPending));
   } else if (cls.contains('photo-del')) {
     if (!confirm('Remover a foto desta parada?')) return;
     await deletePhotos([s.id]);

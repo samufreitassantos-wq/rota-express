@@ -12,7 +12,8 @@ App web (PWA) de roteirização de entregas. Vite + JavaScript puro (ES modules)
 - `src/lib/geo.js` — haversine + vizinho mais próximo + 2-opt (puro, testado)
 - `src/lib/ors.js` — cliente OpenRouteService (geocode, optimization, directions)
 - `src/lib/geocode.js` — ORS se houver chave, senão Nominatim; cache no localStorage. Busca por RUA + NÚMERO + cidade (`queryVariants`): bairro/CEP fazem o Nominatim falhar; depois tenta o endereço completo e por fim só a rua (aproximada)
-- `src/lib/planner.js` — ORS com fallback para otimização local
+- `src/lib/planner.js` — ORS com fallback para otimização local. `planStreetRoute` (usado pelo app): agrupa por rua, otimiza a ordem das RUAS e percorre os números em sequência
+- `src/lib/streets.js` — agrupamento por rua (nome normalizado; mesmo nome a > 3 km ou em outra cidade = outra rua), ordem dos números, trechos para a tela (`streetRuns`), mover/inverter rua (puro, testado). A aba Rota mostra ruas com seus números; `plan.order` continua sendo a lista de ids das paradas
 - `src/lib/pdf.js` — texto de PDF via pdf.js (build **legacy**, necessária no Safari/iPad); páginas sem texto vão para OCR
 - `src/lib/ocr.js` — Tesseract.js com arquivos em `public/ocr/` (gerados por `scripts/copy-ocr-assets.mjs` no predev/prebuild; não versionados)
 - `src/lib/spreadsheet.js` — leitura de .xlsx/.ods (fflate + XML mínimo, com limites) e CSV/TSV; não usar o pacote `xlsx` do npm (vulnerável) (puro, testado; fixtures reais em `tests/fixtures/`)
