@@ -93,3 +93,34 @@ export function extractAddresses(text) {
     })
     .map((address) => ({ address, cep: extractCep(address) }));
 }
+
+const UF_ONLY_RE = /^(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$/i;
+const CEP_ANY = /\b\d{5}-?\d{3}\b/;
+const NUM_ONLY = /^(n[º°o]?\.?\s*)?(\d{1,6}[A-Za-z]?)$/i;
+
+/** Rua e número de um endereço ("Rua X, 10 - Bairro, Cidade - UF, CEP" ou "Rua X 10 apto 2"). */
+export function streetAndNumber(address) {
+  const parts = String(address ?? '').replace(CEP_ANY, ' ').split(/\s*,\s*|\s+[-–]\s+/).map((p) => p.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  let street = parts[0];
+  let number = '';
+  let rest = parts.slice(1);
+  // Número dentro da 1ª parte, mas não o de nomes como "Rua 25 de Março" / "Rua 7 de Setembro".
+  for (const m of street.matchAll(/\s(\d{1,6}[A-Za-z]?)(?=\s|$)/g)) {
+    const before = street.slice(0, m.index).trim();
+    const after = street.slice(m.index + m[0].length);
+    if (/\s/.test(before) && !/^\s+(de|do|da|dos|das|e)\b/i.test(after)) {
+      [street, number] = [before, m[1]];
+      break;
+    }
+  }
+  if (!number && NUM_ONLY.test(rest[0] ?? '')) {
+    number = rest[0].match(NUM_ONLY)[2];
+    rest = rest.slice(1);
+  }
+  const uf = rest.find((p) => UF_ONLY_RE.test(p));
+  const names = rest.filter((p) => !UF_ONLY_RE.test(p) && !/^\d/.test(p) && !/^(brasil|brazil)$/i.test(p));
+  // Com bairro e cidade, a cidade é o último nome; um nome só pode ser bairro ou cidade.
+  const city = names.length >= 2 ? names[names.length - 1] : '';
+  return { street, number, city, maybeCity: names.length === 1 ? names[0] : '', uf: uf?.toUpperCase() ?? '' };
+}
